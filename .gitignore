@@ -1,0 +1,11 @@
+# Build output
+/3ds/app/build/
+/3ds/app/*.elf
+/3ds/app/*.3dsx
+/3ds/app/*.cia
+
+# Dependencies and build output of the Docker build
+/receiver/node_modules/
+/receiver/dist/
+/out/
+

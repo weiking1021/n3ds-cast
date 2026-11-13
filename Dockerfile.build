@@ -1,0 +1,79 @@
+# syntax=docker/dockerfile:1
+#
+# Builds the 3DS app and packages it as an installable .cia (plus the plain .3dsx), all inside Docker.
+#
+#   ./build.sh               -> out/n3ds-cast.cia, out/n3ds-cast.3dsx   (build.bat on Windows)
+#   ./build.sh test          -> runs the whole test suite (fails the build on a failure)
+#
+# Optional build argument (use docker build directly): --build-arg APP_ID=XXXXXXXX  (the Google Cast receiver application ID baked into the app).
+#
+# The base images and the two prebuilt packaging tools are pinned (digest / SHA-256) so the build is reproducible.
+
+ARG DEVKITARM_IMAGE=devkitpro/devkitarm@sha256:116afba8df8453961de2936ffab20dd441edf4d682856c1ec8b0e53d7ed0bbf5
+ARG UBUNTU_IMAGE=ubuntu:24.04@sha256:2198e4c65076e9cb0b3d695219df667c0e3b0072da64ca3c2648aca17dcecaf5
+
+# ---- the two prebuilt packaging tools (they need a newer glibc than the devkitPro image has) ----
+FROM ${UBUNTU_IMAGE} AS cia-tools
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /tools
+# makerom: https://github.com/3DSGuy/Project_CTR (makerom-v0.19.0)
+RUN curl -fsSL -o makerom.zip https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.19.0/makerom-v0.19.0-ubuntu_x86_64.zip \
+    && echo "287b809dec064e0ad597e3d272c49ecb7eed41693d5ee6fef9d8a8aa24c2497e  makerom.zip" | sha256sum -c - \
+    && unzip -q makerom.zip makerom && chmod +x makerom
+# bannertool: https://github.com/carstene1ns/3ds-bannertool (1.2.3)
+RUN curl -fsSL -o bannertool.tgz https://github.com/carstene1ns/3ds-bannertool/releases/download/1.2.3/bannertool-1.2.3-linux.tar.gz \
+    && echo "748519d200519db18e9fd00c332ac32f5411e41230258291e89953a76c1f7155  bannertool.tgz" | sha256sum -c - \
+    && tar -xzf bannertool.tgz --strip-components=1 bannertool-1.2.3-linux/bannertool && chmod +x bannertool
+
+# ---- the 3DS app ----
+FROM ${DEVKITARM_IMAGE} AS build
+ARG APP_ID=
+WORKDIR /project
+COPY 3ds/VERSION VERSION
+COPY 3ds/shared 3ds/shared
+COPY 3ds/app 3ds/app
+RUN cd 3ds/app && make -j"$(nproc)" ${APP_ID:+APP_ID=$APP_ID} APP_VERSION="$(cat /project/VERSION)"
+COPY 3ds/cia/assets/icon.png /tmp/icon.png
+RUN /opt/devkitpro/tools/bin/smdhtool --create "n3ds cast" "Stream your 3DS to a TV or a PC (v$(cat /project/VERSION))" "n3ds-cast" /tmp/icon.png /tmp/n3ds-cast.smdh
+
+# ---- the test suite ----
+FROM build AS test
+COPY 3ds/tests 3ds/tests
+RUN cd 3ds/app && bash test.sh
+
+# ---- source formatting (clang-format, rules in .clang-format) ----
+#   ./build.sh format-check    fails if any C file is not formatted
+#   ./build.sh formatted       rewrites the C files in place
+FROM ${UBUNTU_IMAGE} AS format-base
+RUN apt-get update && apt-get install -y --no-install-recommends clang-format && rm -rf /var/lib/apt/lists/*
+WORKDIR /project
+COPY .clang-format .
+COPY 3ds/shared 3ds/shared
+COPY 3ds/app 3ds/app
+COPY 3ds/tests 3ds/tests
+FROM format-base AS format-check
+RUN find 3ds -name "*.c" -o -name "*.h" | xargs clang-format --dry-run -Werror
+FROM format-base AS format-run
+RUN find 3ds -name "*.c" -o -name "*.h" | xargs clang-format -i
+FROM scratch AS formatted
+COPY --from=format-run /project/3ds /3ds
+
+# ---- the .cia ----
+FROM ${UBUNTU_IMAGE} AS package
+COPY --from=cia-tools /tools/makerom /tools/bannertool /usr/local/bin/
+COPY 3ds/cia/assets /assets
+COPY --from=build /project/3ds/app/n3ds-cast.elf /project/3ds/app/n3ds-cast.3dsx /build/
+COPY --from=build /tmp/n3ds-cast.smdh /build/
+COPY 3ds/cia/app.rsf /build/app.rsf
+COPY 3ds/VERSION /VERSION
+WORKDIR /build
+RUN mkdir /out \
+    && bannertool makebanner -i /assets/banner.png -a /assets/banner.wav -o banner.bnr \
+    && makerom -f cia -o /out/n3ds-cast.cia -target t -exefslogo -elf n3ds-cast.elf -rsf app.rsf -icon n3ds-cast.smdh -banner banner.bnr \
+        -major "$(cut -d. -f1 /VERSION)" -minor "$(cut -d. -f2 /VERSION)" -micro "$(cut -d. -f3 /VERSION)" \
+    && cp n3ds-cast.3dsx /out/
+
+# ---- build output only (./build.sh) ----
+FROM scratch AS out
+COPY --from=package /out/ /

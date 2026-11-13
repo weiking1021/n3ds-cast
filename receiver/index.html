@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>New 3DS Google Cast Receiver</title>
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+</head>
+<body class="filter-pixelated">
+  <div id="splash">
+    <h1>New 3DS Direct Cast Receiver</h1>
+    <p id="splash-status">已就緒，等待 New 3DS 傳送畫面資料...</p>
+    <p id="splash-version"></p>
+  </div>
+
+  <div id="stage" class="mode-top">
+    <div id="wrap-top" class="screen-wrap">
+      <canvas id="canvas-top" class="screen-canvas" width="400" height="240"></canvas>
+    </div>
+    <div id="wrap-bottom" class="screen-wrap">
+      <canvas id="canvas-bottom" class="screen-canvas" width="320" height="240"></canvas>
+    </div>
+  </div>
+
+  <div id="osd">
+    <div><span class="badge" id="osd-state">READY</span><span id="osd-mode">Mode: Top Only</span></div>
+    <div id="osd-stats">FPS: 0 | Frame: 0 KB</div>
+    <div id="osd-jank"></div>
+    <div id="osd-audio">Audio: OFF</div>
+    <div id="osd-version"></div>
+  </div>
+  <div id="dbg">3DS stats: waiting...</div>
+  <button id="audio-enable" hidden>啟用聲音（按確認鍵）</button>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "n3ds-cast-receiver",
+  "version": "1.0.0",
+  "description": "The n3ds-cast receiver: the Google Cast receiver page (TypeScript, built with Vite) plus a PC receiver (Cast protocol server + mDNS) that shows the stream in a browser",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "node server.js",
+    "prestart": "npm run build",
+    "build": "tsc --noEmit && vite build",
+    "pretest": "npm run build",
+    "test": "node test/test.js"
+  },
+  "dependencies": {
+    "selfsigned": "^5.5.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/chromecast-caf-receiver": "^7.0.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}

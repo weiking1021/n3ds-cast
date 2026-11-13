@@ -1,0 +1,29 @@
+---
+# One statement per line, braces on every block, 4 spaces, 120 columns. Include order is left alone (some headers
+# must come first), and long string literals are never broken.
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120
+UseTab: Never
+BreakBeforeBraces: Attach
+InsertBraces: true
+SortIncludes: Never
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+PointerAlignment: Right
+DerivePointerAlignment: false
+SpaceBeforeParens: ControlStatements
+AlignAfterOpenBracket: Align
+BinPackArguments: true
+BinPackParameters: true
+IndentCaseLabels: true
+IndentPPDirectives: None
+BreakStringLiterals: false
+ReflowComments: false
+MaxEmptyLinesToKeep: 1
+...

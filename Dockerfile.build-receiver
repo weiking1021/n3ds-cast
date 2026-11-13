@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1
+#
+# Builds the receiver page for a TV (TypeScript, Vite). Independent of the 3DS build (Dockerfile.build).
+#
+#   docker build -f Dockerfile.build-receiver --output type=local,dest=out/receiver .   -> out/receiver/index.html and assets/
+ARG NODE_IMAGE=node@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+
+FROM ${NODE_IMAGE} AS page
+WORKDIR /receiver
+COPY receiver/package.json receiver/package-lock.json receiver/tsconfig.json receiver/vite.config.mts receiver/index.html ./
+COPY receiver/src src
+RUN npm ci && npm run build
+
+FROM scratch
+COPY --from=page /receiver/dist/ /
