@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import type { AudioMessage } from './protocol';
 
 // Independent IMA ADPCM blocks, decoded without loading an extra codec.
@@ -85,12 +86,12 @@ export class AudioPlayer {
   constructor(private readonly onStatus: AudioStatusHandler) {
     setInterval(() => {
       if (this.lastReceived && Date.now() - this.lastReceived > SILENCE_MS) {
-        this.stop(this.enabled ? 'Audio: waiting for packets' : 'Audio: OFF');
+        this.stop(this.enabled ? t('audio.waitingPackets') : t('audio.off'));
       }
     }, 250);
   }
 
-  stop(status = 'Audio: OFF'): void {
+  stop(status = t('audio.off')): void {
     for (const source of this.sources) {
       source.onended = null;
       try {
@@ -110,7 +111,7 @@ export class AudioPlayer {
   configure(enabled: boolean, kbps: number): void {
     const rate = [32, 64, 128].includes(kbps) ? kbps : 64;
     if (this.enabled !== enabled || this.kbps !== rate) {
-      this.stop(enabled ? `Audio: ${rate} kbps, waiting` : 'Audio: OFF');
+      this.stop(enabled ? t('audio.waiting', { kbps: rate }) : t('audio.off'));
       this.enabled = enabled;
       this.kbps = rate;
     }
@@ -135,7 +136,7 @@ export class AudioPlayer {
         this.resuming = true;
         Promise.resolve(this.ctx.resume())
           .catch(() => {
-            if (this.enabled) this.onStatus('Audio: press OK to enable', true);
+            if (this.enabled) this.onStatus(t('audio.pressOk'), true);
           })
           .finally(() => {
             this.resuming = false;
@@ -155,7 +156,7 @@ export class AudioPlayer {
       const pcm = decodeAdpcm(msg);
       if (this.lastSeq !== null && msg.seq <= this.lastSeq) return;
       if (!this.resume()) {
-        if (this.ctx) this.onStatus('Audio: press OK to enable', true);
+        if (this.ctx) this.onStatus(t('audio.pressOk'), true);
         return; // Never accumulate audio while playback is suspended.
       }
       const ctx = this.ctx as AudioContext;
@@ -187,7 +188,7 @@ export class AudioPlayer {
         this.leadChanged = now;
       }
       if (gap || underrun || !playing) {
-        this.stop('Audio: buffering');
+        this.stop(t('audio.buffering'));
         this.nextTime = now + this.lead;
       } else if (this.nextTime > now + this.lead + BURST_MARGIN) {
         // Packets arrived in a burst and the queue grew past the target: skip this one instead of playing it late.

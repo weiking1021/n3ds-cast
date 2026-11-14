@@ -1,3 +1,4 @@
+import { applyStaticText, onLocaleChange, t, type MessageKey } from './i18n';
 import type { DisplayConfig, StatsMessage } from './protocol';
 
 function element<T extends HTMLElement>(id: string): T {
@@ -7,7 +8,7 @@ function element<T extends HTMLElement>(id: string): T {
 }
 
 const LAYOUT_CLASSES = ['mode-top', 'mode-bottom', 'mode-vertical', 'mode-side', 'mode-pip'];
-const LAYOUT_NAMES = ['Top Only', 'Bottom Only', 'Vertical Dual', 'Side-by-Side', 'Picture-in-Picture'];
+const LAYOUT_NAMES: MessageKey[] = ['mode.top', 'mode.bottom', 'mode.vertical', 'mode.side', 'mode.pip'];
 const AUDIO_STATE = ['off', 'waiting for game DSP', 'DSP layout unsupported', 'live'];
 const DSP_KIND = ['none', 'pipe table', 'std firmware 0x7FFE'];
 
@@ -15,6 +16,12 @@ const DSP_KIND = ['none', 'pipe table', 'std firmware 0x7FFE'];
 export class Hud {
   /** JPEG quality the 3DS used: current value, and the range over the last second when it moved. */
   lastQuality = '';
+
+  // What is shown in words is remembered as a key (and a number), so that it can be drawn again in another language.
+  private stateKey: MessageKey = 'state.ready';
+  private splashKey: MessageKey = 'splash.waiting';
+  private layout = 0;
+  private senderVersion = '';
 
   private readonly stage = element('stage');
   private readonly splash = element('splash');
@@ -31,21 +38,32 @@ export class Hud {
 
   constructor(private readonly receiverVersion: string) {
     element('splash-version').textContent = `v${receiverVersion}`;
-    this.showVersions('');
+    onLocaleChange(() => this.refresh());
+    this.refresh();
+  }
+
+  /** Draws all the words again, in the current language. */
+  refresh(): void {
+    applyStaticText(document);
+    this.state.textContent = t(this.stateKey);
+    this.splashStatus.textContent = t(this.splashKey);
+    this.mode.textContent = `${t('mode.label')}: ${t(LAYOUT_NAMES[this.layout] || 'mode.top')}`;
+    this.versions.textContent = this.senderVersion
+      ? t('version.both', { sender: this.senderVersion, receiver: this.receiverVersion })
+      : t('version.receiver', { receiver: this.receiverVersion });
   }
 
   /** The 3DS program announces its version in its CAPS message; both are shown. */
   showVersions(senderVersion: string): void {
-    this.versions.textContent = senderVersion
-      ? `3DS v${senderVersion} / receiver v${this.receiverVersion}`
-      : `receiver v${this.receiverVersion}`;
+    this.senderVersion = senderVersion;
+    this.refresh();
   }
 
   /** Layout, filter, aspect and OSD visibility as the 3DS asked for. (The audio part is the caller's.) */
   applyLayout(cfg: DisplayConfig): void {
-    const layout = Number(cfg.layout ?? 0);
-    this.stage.className = LAYOUT_CLASSES[layout] || 'mode-top';
-    this.mode.textContent = `Mode: ${LAYOUT_NAMES[layout] || 'Top Only'}`;
+    this.layout = Number(cfg.layout ?? 0);
+    this.stage.className = LAYOUT_CLASSES[this.layout] || 'mode-top';
+    this.refresh();
     document.body.classList.toggle('filter-pixelated', cfg.filter !== 1);
     document.body.classList.toggle('filter-smooth', cfg.filter === 1);
     document.body.classList.toggle('stretch-fill', cfg.stretch === 1);
@@ -55,12 +73,14 @@ export class Hud {
     }
   }
 
-  setState(text: string): void {
-    this.state.textContent = text;
+  setState(key: MessageKey): void {
+    this.stateKey = key;
+    this.state.textContent = t(key);
   }
 
-  setSplashStatus(text: string): void {
-    this.splashStatus.textContent = text;
+  setSplashStatus(key: MessageKey): void {
+    this.splashKey = key;
+    this.splashStatus.textContent = t(key);
   }
 
   showSplash(): void {

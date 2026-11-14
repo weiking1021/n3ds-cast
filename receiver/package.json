@@ -9,7 +9,7 @@
     "prestart": "npm run build",
     "build": "tsc --noEmit && vite build",
     "pretest": "npm run build",
-    "test": "node test/test.js"
+    "test": "node test/test.js && node test/test_i18n.mjs"
   },
   "dependencies": {
     "selfsigned": "^5.5.0",

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,8 +8,8 @@
 </head>
 <body class="filter-pixelated">
   <div id="splash">
-    <h1>New 3DS Direct Cast Receiver</h1>
-    <p id="splash-status">已就緒，等待 New 3DS 傳送畫面資料...</p>
+    <h1 data-i18n="splash.title">New 3DS Direct Cast Receiver</h1>
+    <p id="splash-status"></p>
     <p id="splash-version"></p>
   </div>
 
@@ -30,7 +30,7 @@
     <div id="osd-version"></div>
   </div>
   <div id="dbg">3DS stats: waiting...</div>
-  <button id="audio-enable" hidden>啟用聲音（按確認鍵）</button>
+  <button id="audio-enable" hidden data-i18n="audio.enable">Enable sound (press OK)</button>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

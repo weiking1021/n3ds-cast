@@ -19,6 +19,7 @@ export interface CapsMessage {
   type: 'CAPS';
   rects?: number;
   ver?: string;
+  lang?: string; // the language the 3DS program is set to (a language tag such as "en" or "zh-TW")
 }
 
 /** The page's answer to CAPS. */

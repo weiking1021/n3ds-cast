@@ -3,13 +3,23 @@ import { version } from '../package.json';
 import { AudioPlayer } from './audio';
 import { createCastContext, createDevContext, type ReceiverContext } from './context';
 import { Hud } from './hud';
+import { resolveLocale, setLocale, t } from './i18n';
 import { NAMESPACE, type DisplayConfig, type HelloMessage, type Message } from './protocol';
 import { Video } from './video';
 
-const WAITING_FOR_3DS = 'PC 測試接收端：等待 3DS 連線...';
+// ---- The language: the address's ?lang= first (for trying), then the language the 3DS program is set to (its CAPS
+// message), then what the browser or the TV prefers; a candidate that is missing or not supported is skipped, and
+// without any match it is English.
+const params = new URLSearchParams(location.search);
+let senderLanguage: string | undefined;
+function chooseLanguage(): void {
+  setLocale(resolveLocale([params.get('lang'), senderLanguage, ...(navigator.languages || [navigator.language])]));
+}
+chooseLanguage();
 
 const hud = new Hud(version);
 const audio = new AudioPlayer((status, needsGesture) => hud.setAudioStatus(status, needsGesture));
+hud.setAudioStatus(t('audio.off'), false);
 hud.onAudioEnable(() => audio.resume(true));
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && audio.enabled) audio.resume(true);
@@ -23,14 +33,13 @@ function applyConfig(cfg: DisplayConfig): void {
 
 const video = new Video(hud, (cfg) => {
   hud.hideSplash();
-  hud.setState('LIVE');
+  hud.setState('state.live');
   if (cfg) applyConfig(cfg);
 });
 
 // ---- Where are we running? On a Cast device the real Cast SDK drives this page. Anywhere else (a desktop browser
 // opened from receiver/server.js, http://localhost:8080) there is no Cast SDK, so a small stand-in with the same
 // three calls is connected by WebSocket to the PC receiver. Override with ?dev=1 (stand-in) or ?dev=0 (real SDK).
-const params = new URLSearchParams(location.search);
 const dev = params.get('dev');
 const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 const devMode = dev === '1' || (dev !== '0' && (typeof cast === 'undefined' || !cast.framework || local));
@@ -40,16 +49,18 @@ const devMode = dev === '1' || (dev !== '0' && (typeof cast === 'undefined' || !
 function resetPage(): void {
   video.reset();
   hud.showSplash();
-  hud.setSplashStatus(WAITING_FOR_3DS);
-  hud.setState('READY');
+  hud.setSplashStatus('splash.waitingPc');
+  hud.setState('state.ready');
   hud.lastQuality = '';
   hud.showVersions('');
-  audio.stop('Audio: OFF');
+  audio.stop(t('audio.off'));
+  senderLanguage = undefined;
+  chooseLanguage();
 }
 
 const context: ReceiverContext = devMode
   ? createDevContext(params.get('ws') || `ws://${location.hostname || 'localhost'}:${location.port || 8080}/dev`, {
-      onOpen: () => hud.setSplashStatus(WAITING_FOR_3DS),
+      onOpen: () => hud.setSplashStatus('splash.waitingPc'),
       onReset: resetPage,
     })
   : createCastContext();
@@ -72,6 +83,10 @@ function handleMessage(raw: unknown, senderId: string): void {
       // The sender asks what this page understands: "rects" = partial screen updates (RECT messages). An older page
       // never answers and the sender keeps to whole Base64 frames.
       hud.showVersions(typeof message.ver === 'string' ? message.ver.slice(0, 16) : '');
+      if (typeof message.lang === 'string') {
+        senderLanguage = message.lang;
+        chooseLanguage();
+      }
       const hello: HelloMessage = { type: 'HELLO', v: 4, ok: true, rects: true, ver: version };
       context.sendCustomMessage(NAMESPACE, senderId, hello);
       break;
@@ -81,10 +96,10 @@ function handleMessage(raw: unknown, senderId: string): void {
       break;
     case 'CONFIG':
       // A fresh sender session can restart audio sequence numbers at zero.
-      audio.stop(message.audio_enabled === 1 ? 'Audio: waiting for packets' : 'Audio: OFF');
+      audio.stop(message.audio_enabled === 1 ? t('audio.waitingPackets') : t('audio.off'));
       applyConfig(message);
-      hud.setState('CONFIGURED');
-      hud.setSplashStatus('已連線至 New 3DS，等待串流開始...');
+      hud.setState('state.configured');
+      hud.setSplashStatus('splash.connected');
       break;
     case 'STATS':
       try {

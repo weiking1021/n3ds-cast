@@ -108,6 +108,8 @@ The page is TypeScript (`receiver/src/`) built with Vite: `npm run build` in `re
 
 `.github/workflows/pages.yml` does this and publishes the page to GitHub Pages whenever `receiver/` changes on `main`, after `npm test` (which builds the page) passes. Enable it once with Settings → Pages → Source: GitHub Actions, then register the page's URL as the receiver URL of your Cast application (Google Cast SDK Developer Console) and put the application ID in the 3DS build (`--build-arg APP_ID=...`).
 
+The page speaks English and Traditional Chinese and picks the language by itself: `?lang=en` or `?lang=zh-TW` in the address first (for trying), then the language the 3DS program asks for (a `lang` field in its `CAPS` message), then the preferences of the browser or the TV, and English when none of them matches. Technical readouts (FPS, sizes, timings, the 3DS debug panel) stay English. The texts are in `receiver/src/i18n.ts`.
+
 The page shows its own version (`version` in `receiver/package.json`) and, once a 3DS is connected, the version of the 3DS program. The two are versioned independently.
 
 ## Tests
