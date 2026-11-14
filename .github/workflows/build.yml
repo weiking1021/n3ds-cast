@@ -7,18 +7,23 @@ on:
 jobs:
   format:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - run: ./build.sh format-check
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # The tests run under AddressSanitizer, which loops forever on the runner's default address randomization.
+      - run: sudo sysctl vm.mmap_rnd_bits=28
       - run: ./build.sh test
 
   receiver:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: receiver
@@ -33,6 +38,7 @@ jobs:
   cia:
     needs: [format, test]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - run: ./build.sh
