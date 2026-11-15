@@ -1,0 +1,21 @@
+name: release
+
+# Pushing a version tag (v1.2.3) builds the 3DS program and publishes it as a release. The version inside the
+# files is the one in 3ds/VERSION; the tag only starts the build.
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./build.sh
+      - run: gh release create "$GITHUB_REF_NAME" out/n3ds-cast.cia out/n3ds-cast.3dsx --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
