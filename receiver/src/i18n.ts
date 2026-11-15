@@ -1,7 +1,7 @@
 // The words the page shows to people (the numbers and technical readouts stay English). The language is chosen
 // automatically: see resolveLocale().
 
-export type Locale = 'en' | 'zh-TW';
+export type Locale = 'en' | 'zh-TW' | 'ja';
 
 const en = {
   'splash.title': 'New 3DS Direct Cast Receiver',
@@ -54,7 +54,31 @@ const zhTW: Catalog = {
   'audio.pressOk': '音訊：請按確認鍵啟用',
 };
 
-export const CATALOGS: Record<Locale, Catalog> = { en, 'zh-TW': zhTW };
+const ja: Catalog = {
+  'splash.title': 'New 3DS ダイレクトキャスト受信側',
+  'splash.waiting': '準備完了。New 3DSからの映像を待っています...',
+  'splash.connected': 'New 3DSに接続しました。配信の開始を待っています...',
+  'splash.waitingPc': 'PCテスト受信側：3DSの接続を待っています...',
+  'audio.enable': '音声を有効にする（OKボタン）',
+  'state.ready': '準備完了',
+  'state.live': '配信中',
+  'state.configured': '設定済み',
+  'mode.label': 'レイアウト',
+  'mode.top': '上画面のみ',
+  'mode.bottom': '下画面のみ',
+  'mode.vertical': '上下に並べる',
+  'mode.side': '左右に並べる',
+  'mode.pip': '子画面',
+  'version.both': '3DS v{sender} / 受信側 v{receiver}',
+  'version.receiver': '受信側 v{receiver}',
+  'audio.off': '音声：オフ',
+  'audio.waiting': '音声：{kbps} kbps、待機中',
+  'audio.waitingPackets': '音声：パケット待ち',
+  'audio.buffering': '音声：バッファ中',
+  'audio.pressOk': '音声：OKボタンで有効にします',
+};
+
+export const CATALOGS: Record<Locale, Catalog> = { en, 'zh-TW': zhTW, ja };
 
 export const DEFAULT_LOCALE: Locale = 'en';
 
@@ -64,6 +88,7 @@ export function matchLocale(tag: string | null | undefined): Locale | null {
   const primary = tag.toLowerCase().replace(/_/g, '-').split('-')[0];
   if (primary === 'en') return 'en';
   if (primary === 'zh') return 'zh-TW'; // the only Chinese there is: Traditional is read by people who use Simplified too
+  if (primary === 'ja') return 'ja';
   return null;
 }
 
