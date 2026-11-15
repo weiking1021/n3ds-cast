@@ -10,7 +10,7 @@
 #endif
 #define NATIVE_PORT "n3dcast"
 #define NATIVE_MAGIC 0x4E334443u
-#define NATIVE_VERSION 32u
+#define NATIVE_VERSION 33u
 // jpeg_quality 0 = automatic: the encoder adapts it to the scene (see encoder_thread).
 #define NATIVE_QUALITY_AUTO 0
 #define NATIVE_MEMORY_LIMIT (8u * 1024 * 1024)
@@ -98,6 +98,13 @@ static inline int native_config_valid(const CastConfig *cfg) {
         if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
             return 0;
         }
+    }
+    unsigned lang_length = 0;
+    while (lang_length < sizeof(cfg->lang) && cfg->lang[lang_length]) {
+        lang_length++;
+    }
+    if (lang_length == sizeof(cfg->lang)) {
+        return 0;
     }
     return i == 8 && cfg->layout_mode >= 0 && cfg->layout_mode < LAYOUT_COUNT && cfg->scale_filter >= 0 &&
            cfg->scale_filter < FILTER_COUNT && cfg->stretch_mode >= 0 && cfg->stretch_mode < STRETCH_COUNT &&

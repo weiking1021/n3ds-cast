@@ -101,7 +101,7 @@ driver=r'''
 #include <string.h>
 int main(void){
  if(!native_ui_init())return 1;
- for(unsigned lang=0;lang<2;lang++)for(unsigned page=0;page<12;page++){
+ for(unsigned lang=0;lang<3;lang++)for(unsigned page=0;page<12;page++){
  NativeUI ui={0};ui.language=lang;ui.show_timings=page==6;ui.cfg.jpeg_quality=50;ui.cfg.target_fps=30;ui.cfg.audio_kbps=64;
  strcpy(ui.cfg.tv_ip,"192.168.1.241");strcpy(ui.cfg.app_id,"01B7A380");ui.cfg.layout_mode=3;
  strcpy(ui.status.message,"Streaming game video directly to TV");ui.status.state=NATIVE_STREAMING;
@@ -114,7 +114,7 @@ int main(void){
  if(page==10){ui.tab=1;ui.tv_count=2;strcpy(ui.tvs[0].name,"Cast\xF0\x9F\x99\x82TV");strcpy(ui.tvs[1].name,"AB\xE9\x9B");}
  if(page==11){ui.tab=1;ui.tv_count=1;strcpy(ui.tvs[0].name,"\xE9\x9B\xBB\x9B");}
  if(page==9){ui.tab=2;ui.selected_setting=12;ui.cpu_core=2;ui.capture_source=1;ui.status.worker_core=2;}
- printf("{\"op\":\"case\",\"name\":\"%s-%u\"}\n",lang?"zh":"en",page);native_ui_draw(&ui);
+ printf("{\"op\":\"case\",\"name\":\"%s-%u\"}\n",lang==2?"ja":lang?"zh":"en",page);native_ui_draw(&ui);
  }native_ui_exit();return 0;}
 '''
 (work/'driver.c').write_text(driver)
@@ -173,4 +173,4 @@ names=[c['text'] for k in ('en-10','en-11') for c in cases[k] if c['op']=='text'
 assert 'Cast?TV' in names and 'AB?' in names and '\u96fb?' in names,names
 assert not any('\U0001F642' in t for t in names)
 (out/'draw-calls.json').write_text(json.dumps(cases,ensure_ascii=False,indent=2))
-print('PASS: 24 layouts rendered from real ui.c; native screen bounds, >=0.66 scale, complete settings labels/values, unknown or broken characters shown as ?')
+print('PASS: 36 layouts (3 languages x 12 pages) rendered from real ui.c; native screen bounds, >=0.66 scale, complete settings labels/values, unknown or broken characters shown as ?')

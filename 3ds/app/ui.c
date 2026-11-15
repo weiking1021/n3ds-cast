@@ -302,7 +302,7 @@ void native_ui_draw(const NativeUI *ui) {
         snprintf(values[6], 64, "%s", ui->cfg.show_osd ? "On" : "Off");
         snprintf(values[7], 64, "%s", ui->cfg.audio_enabled ? "Game mix" : "Off");
         snprintf(values[8], 64, "%d kbps", ui->cfg.audio_kbps);
-        snprintf(values[9], 64, "%s", language == NATIVE_LANG_ZH_TW ? "繁體中文" : "English");
+        snprintf(values[9], 64, "%s", native_language_name(language));
         static const char *cores[] = {"Auto", "Core 1", "Core 2"};
         snprintf(values[10], 64, "%s", cores[ui->cpu_core < 3 ? ui->cpu_core : 0]);
         snprintf(values[11], 64, "%s", ui->capture_source ? "Always" : "Games only");

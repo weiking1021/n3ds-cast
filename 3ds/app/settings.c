@@ -80,7 +80,7 @@ void native_load_settings(CastConfig *cfg) {
 }
 
 unsigned native_load_language(void) {
-    unsigned language = NATIVE_LANG_ZH_TW;
+    unsigned language = NATIVE_LANG_EN;
     FILE *file = fopen(NATIVE_CONFIG_PATH, "r");
     if (!file) {
         return language;
@@ -94,10 +94,10 @@ unsigned native_load_language(void) {
         *value++ = 0;
         if (!strcmp(trim(key), "ui_language")) {
             value = trim(value);
-            if (!strcmp(value, "en")) {
-                language = NATIVE_LANG_EN;
-            } else if (!strcmp(value, "zh-TW")) {
-                language = NATIVE_LANG_ZH_TW;
+            for (unsigned i = 0; i < NATIVE_LANG_COUNT; i++) {
+                if (!strcmp(value, native_language_tag(i))) {
+                    language = i;
+                }
             }
         }
     }
@@ -175,8 +175,7 @@ bool native_save_settings(const CastConfig *cfg, unsigned language, bool show_ti
         return false;
     }
     bool ok = fprintf(file, "audio_source=%s\nui_language=%s\nshow_timings=%d\ncpu_core=%s\ncapture_source=%s\n",
-                      cfg->audio_enabled ? "game" : "off", language == NATIVE_LANG_ZH_TW ? "zh-TW" : "en",
-                      show_timings ? 1 : 0,
+                      cfg->audio_enabled ? "game" : "off", native_language_tag(language), show_timings ? 1 : 0,
                       cpu_core == 1   ? "1"
                       : cpu_core == 2 ? "2"
                                       : "auto",
@@ -197,8 +196,7 @@ bool native_save_settings(const CastConfig *cfg, unsigned language, bool show_ti
         return false;
     }
     ok = fprintf(file, "audio_source=%s\nui_language=%s\nshow_timings=%d\ncpu_core=%s\ncapture_source=%s\n",
-                 cfg->audio_enabled ? "game" : "off", language == NATIVE_LANG_ZH_TW ? "zh-TW" : "en",
-                 show_timings ? 1 : 0,
+                 cfg->audio_enabled ? "game" : "off", native_language_tag(language), show_timings ? 1 : 0,
                  cpu_core == 1   ? "1"
                  : cpu_core == 2 ? "2"
                                  : "auto",

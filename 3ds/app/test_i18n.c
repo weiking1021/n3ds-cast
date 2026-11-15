@@ -51,10 +51,11 @@ static void test_catalog(void) {
         for (unsigned j = i + 1; j < native_translation_count; j++) {
             assert(strcmp(native_translations[i].en, native_translations[j].en) != 0);
         }
-        char english[64], chinese[64];
+        char english[64], chinese[64], japanese[64];
         conversions(native_translations[i].en, english, sizeof(english));
         conversions(native_translations[i].zh, chinese, sizeof(chinese));
-        if (strcmp(english, chinese) != 0) {
+        conversions(native_translations[i].ja, japanese, sizeof(japanese));
+        if (strcmp(english, chinese) != 0 || strcmp(english, japanese) != 0) {
             fprintf(stderr, "format arguments differ: %s\n", native_translations[i].en);
             abort();
         }
@@ -73,12 +74,21 @@ static void test_glyph_coverage(void) {
     }
     fclose(list);
     for (unsigned i = 0; i < native_translation_count; i++) {
-        for (const unsigned char *p = (const unsigned char *)native_translations[i].zh; *p;) {
-            unsigned c = next_codepoint(&p);
-            if (c >= MAX_CODEPOINT || !covered[c]) {
-                fprintf(stderr, "no glyph for U+%04X in: %s\n", c, native_translations[i].zh);
-                abort();
+        const char *texts[] = {native_translations[i].zh, native_translations[i].ja};
+        for (unsigned t = 0; t < 2; t++) {
+            for (const unsigned char *p = (const unsigned char *)texts[t]; *p;) {
+                unsigned c = next_codepoint(&p);
+                if (c >= MAX_CODEPOINT || !covered[c]) {
+                    fprintf(stderr, "no glyph for U+%04X in: %s\n", c, texts[t]);
+                    abort();
+                }
             }
+        }
+    }
+    for (unsigned language = 0; language < NATIVE_LANG_COUNT; language++) { // the language names of the settings screen
+        for (const unsigned char *p = (const unsigned char *)native_language_name(language); *p;) {
+            unsigned c = next_codepoint(&p);
+            assert(c < MAX_CODEPOINT && covered[c]);
         }
     }
     FILE *font = fopen("assets/ui-font.bcfnt", "rb");
@@ -91,7 +101,12 @@ static void test_glyph_coverage(void) {
 static void test_lookup_and_split(void) {
     assert(!strcmp(native_tr(NATIVE_LANG_EN, "READY"), "READY"));
     assert(!strcmp(native_tr(NATIVE_LANG_ZH_TW, "READY"), "準備就緒"));
-    assert(!strcmp(native_tr(2, "unknown"), "unknown")); // no such language: the English text
+    assert(!strcmp(native_tr(NATIVE_LANG_JA, "READY"), "準備完了"));
+    assert(!strcmp(native_tr(NATIVE_LANG_COUNT, "READY"), "READY")); // no such language: the English text
+    assert(!strcmp(native_language_tag(NATIVE_LANG_EN), "en") &&
+           !strcmp(native_language_tag(NATIVE_LANG_ZH_TW), "zh-TW") &&
+           !strcmp(native_language_tag(NATIVE_LANG_JA), "ja"));
+    assert(!strcmp(native_language_name(NATIVE_LANG_JA), "日本語"));
     assert(!strcmp(native_tr(NATIVE_LANG_ZH_TW, "not in the catalog"), "not in the catalog"));
     const char *value = "這是一段很長的繁體中文狀態訊息，用來檢查換行不會切斷中文字元，並且完整保留後續內容。";
     char first[128], second[160], joined[288];
@@ -105,6 +120,7 @@ int main(void) {
     test_catalog();
     test_glyph_coverage();
     test_lookup_and_split();
-    puts("PASS: English/Traditional Chinese catalog, format argument parity, embedded glyph coverage and UTF-8 line "
-         "boundaries");
+    puts(
+        "PASS: English/Traditional Chinese/Japanese catalog, format argument parity, embedded glyph coverage and UTF-8 "
+        "line boundaries");
 }

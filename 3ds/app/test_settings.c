@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "settings.h"
+#include "i18n.h"
 #include "protocol.h"
 #include <assert.h>
 #include <stdio.h>
@@ -13,7 +14,8 @@ int main(void) {
     CastConfig cfg;
     native_load_settings(&cfg);
     assert(!strcmp(cfg.app_id, "01B7A380") && cfg.target_fps == 30 && cfg.jpeg_quality == NATIVE_QUALITY_AUTO);
-    assert(!cfg.show_osd && native_load_capture_source() == 1); // defaults without any settings file
+    assert(!cfg.show_osd && native_load_capture_source() == 1 &&
+           native_load_language() == NATIVE_LANG_EN); // defaults without any settings file
     strcpy(cfg.tv_ip, "192.168.1.100");
     strcpy(cfg.app_id, "ABCD1234");
     cfg.jpeg_quality = 100;
@@ -53,6 +55,9 @@ int main(void) {
     native_load_settings(&cfg);
     assert(!cfg.audio_enabled && native_load_language() == 1 && native_load_show_timings());
     assert(native_load_cpu_core() == 0 && native_load_capture_source() == 0);
+    for (unsigned language = 0; language < NATIVE_LANG_COUNT; language++) { // every language comes back as saved
+        assert(native_save_settings(&cfg, language, true, 0, 0) && native_load_language() == language);
+    }
     puts(
         "PASS: separate native.ini persistence, read-only legacy import, literal IP/App ID preserved, full display settings round trip");
 }

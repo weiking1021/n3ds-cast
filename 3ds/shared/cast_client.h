@@ -85,8 +85,11 @@ bool cast_client_send_json(CastClient *client, const char *json);
 extern volatile uint64_t cast_net_ticks;
 extern volatile uint64_t cast_write_ticks;
 
-/** Asks the receiver what it understands; it answers HELLO ("rects":true = partial screen updates). */
-bool cast_client_send_caps(CastClient *client);
+/**
+ * Asks the receiver what it understands; it answers HELLO ("rects":true = partial screen updates). Tells it this
+ * program's version and, when cfg->lang is set, the language to show its texts in.
+ */
+bool cast_client_send_caps(CastClient *client, const CastConfig *cfg);
 
 /** One rectangle of a screen as its own small Base64 JPEG (partial updates). screen: 0 top, 1 bottom. */
 typedef struct {

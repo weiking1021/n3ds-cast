@@ -343,6 +343,8 @@ static bool toggle_stream(App *app) {
     }
     Result rc = native_request(app->resident, ui->show_timings ? NATIVE_OSD_ON : NATIVE_OSD_OFF, NULL, &ui->status);
     NativeStartConfig start = {.cast = ui->cfg, .cpu_core = ui->cpu_core, .capture_source = ui->capture_source};
+    snprintf(start.cast.lang, sizeof(start.cast.lang), "%s",
+             native_language_tag(ui->language)); // the receiver page speaks it
     if (!rc) {
         rc = native_request(app->resident, NATIVE_START, &start, &ui->status);
     }

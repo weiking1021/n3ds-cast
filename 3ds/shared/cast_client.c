@@ -617,7 +617,7 @@ bool cast_client_connect_and_launch(CastClient *client, const CastConfig *cfg) {
     snprintf(client->status_msg, sizeof(client->status_msg), "Streaming to %s", cfg->tv_ip);
     cast_client_send_config(client, cfg); // the initial projection config
     client->peer_rects = false;
-    cast_client_send_caps(client); // an up-to-date receiver answers HELLO and says what it understands
+    cast_client_send_caps(client, cfg); // an up-to-date receiver answers HELLO and says what it understands
     return true;
 }
 
@@ -807,14 +807,27 @@ const char *cast_client_cipher(const CastClient *client) {
     return name ? name : "";
 }
 
-bool cast_client_send_caps(CastClient *client) {
+bool cast_client_send_caps(CastClient *client, const CastConfig *cfg) {
     if (client->state != CAST_STATE_STREAMING || client->transport_id[0] == '\0') {
         return false;
     }
+    // A language tag is letters and hyphens only; anything else is not sent (it goes into JSON as it is).
+    char lang[sizeof(cfg->lang) + 12] = "";
+    size_t length = strnlen(cfg->lang, sizeof(cfg->lang));
+    bool valid = length > 0 && length < sizeof(cfg->lang);
+    for (size_t i = 0; valid && i < length; i++) {
+        char c = cfg->lang[i];
+        valid = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-';
+    }
+    if (valid) {
+        snprintf(lang, sizeof(lang), ",\"lang\":\"%s\"", cfg->lang);
+    }
     // The receiver answers with HELLO listing what it understands: "rects":true = partial screen updates. The
-    // message also carries this program's version, which the receiver page shows next to its own.
-    return send_cast_packet(client, client->transport_id, CAST_NS_CUSTOM,
-                            "{\"type\":\"CAPS\",\"rects\":1,\"ver\":\"" NATIVE_APP_VERSION "\"}");
+    // message also carries this program's version, which the receiver page shows next to its own, and the language
+    // this program is set to, which the page shows its texts in.
+    char json[96];
+    snprintf(json, sizeof(json), "{\"type\":\"CAPS\",\"rects\":1,\"ver\":\"" NATIVE_APP_VERSION "\"%s}", lang);
+    return send_cast_packet(client, client->transport_id, CAST_NS_CUSTOM, json);
 }
 
 bool cast_client_send_rects(CastClient *client, const CastConfig *cfg, const CastRect *rects, unsigned count) {

@@ -323,6 +323,29 @@ static void test_connect_and_cancel(void) {
         }
         cast_client_cleanup(&c);
     }
+    // The receiver is also told the language to speak; it is optional, and only a plain language tag is sent.
+    const char *tags[] = {"", "ja", "x\"y", "zh-TW", NULL};
+    const unsigned expected[] = {0, 1, 0, 1, 0};
+    for (unsigned i = 0; i < sizeof(tags) / sizeof(*tags); i++) {
+        mode = 0;
+        reset();
+        CastClient c = new_client();
+        receiver_says(CAST_NS_RECEIVER, LAUNCHED, 0);
+        if (tags[i]) {
+            snprintf(cfg.lang, sizeof(cfg.lang), "%s", tags[i]);
+        } else {
+            memset(cfg.lang, 'a', sizeof(cfg.lang)); // no terminator
+        }
+        assert(cast_client_connect_and_launch(&c, &cfg) && count_sent("\"CAPS\"") == 1);
+        assert(count_sent("\"lang\":") == expected[i]);
+        if (expected[i]) {
+            char wanted[32]; // (tags[i] is not NULL here)
+            snprintf(wanted, sizeof(wanted), "\"lang\":\"%s\"", tags[i]);
+            assert(count_sent(wanted) == 1);
+        }
+        cast_client_cleanup(&c);
+    }
+    cfg.lang[0] = 0;
     // A client without a cancel callback still connects (old callers).
     mode = 0;
     reset();

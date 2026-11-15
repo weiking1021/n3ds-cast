@@ -30,6 +30,7 @@ typedef enum {
 typedef struct {
     char tv_ip[64];
     char app_id[32];
+    char lang[8]; // language tag the receiver page should show its texts in ("en", "zh-TW", "ja"); empty = none
     int layout_mode;
     int scale_filter;
     int stretch_mode;
