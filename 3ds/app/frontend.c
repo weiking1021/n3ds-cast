@@ -100,8 +100,8 @@ static void edit_setting(NativeUI *ui, int direction, bool press_a) {
             break;
         }
         case 5:
-            ui->cfg.target_fps = 5 + ((ui->cfg.target_fps - 5) / 5 + direction + 6) % 6 * 5;
-            break; // 5..30
+            ui->cfg.target_fps = 5 + ((ui->cfg.target_fps - 5) / 5 + direction + 12) % 12 * 5;
+            break; // 5..60
         case 6:
             ui->cfg.show_osd ^= 1;
             break;

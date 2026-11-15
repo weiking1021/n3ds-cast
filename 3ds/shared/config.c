@@ -11,9 +11,9 @@ void config_init_defaults(CastConfig *cfg) {
     cfg->layout_mode = LAYOUT_TOP_ONLY;
     cfg->scale_filter = FILTER_PIXELATED;
     cfg->stretch_mode = STRETCH_KEEP_ASPECT;
-    cfg->jpeg_quality = 70;
-    cfg->target_fps = 20;
-    cfg->show_osd = 1;
+    cfg->jpeg_quality = 0; // automatic
+    cfg->target_fps = 30;
+    cfg->show_osd = 0;
     cfg->audio_enabled = 0;
     cfg->audio_kbps = 64;
 }
@@ -90,7 +90,7 @@ bool config_load(CastConfig *cfg, const char *path) {
             }
         } else if (strcmp(key, "target_fps") == 0) {
             int v = atoi(val);
-            if (v >= 5 && v <= 30) {
+            if (v >= 5 && v <= 60) {
                 cfg->target_fps = v;
             }
         } else if (strcmp(key, "show_osd") == 0) {

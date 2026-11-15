@@ -15,7 +15,7 @@ static char *trim(char *p) {
 void native_load_settings(CastConfig *cfg) {
     config_init_defaults(cfg);
     snprintf(cfg->app_id, sizeof(cfg->app_id), "%s", NATIVE_APP_ID);
-    cfg->jpeg_quality = 50;
+    cfg->jpeg_quality = NATIVE_QUALITY_AUTO;
     cfg->target_fps = 30;
     cfg->audio_enabled = 1;
     cfg->audio_kbps = 64;
@@ -33,7 +33,7 @@ void native_load_settings(CastConfig *cfg) {
     };
     struct Setting fields[] = {{"layout_mode", &cfg->layout_mode, 0, 4},   {"scale_filter", &cfg->scale_filter, 0, 1},
                                {"stretch_mode", &cfg->stretch_mode, 0, 1}, {"jpeg_quality", &cfg->jpeg_quality, 0, 100},
-                               {"target_fps", &cfg->target_fps, 5, 30},    {"show_osd", &cfg->show_osd, 0, 1}};
+                               {"target_fps", &cfg->target_fps, 5, 60},    {"show_osd", &cfg->show_osd, 0, 1}};
     char line[256];
     while (fgets(line, sizeof(line), file)) {
         char *key = trim(line);
@@ -160,9 +160,9 @@ unsigned native_load_cpu_core(void) {
 unsigned native_load_capture_source(void) {
     char value[16];
     if (!read_value("capture_source", value, sizeof(value))) {
-        return 0;
+        return 1; // the screen, whatever is displayed
     }
-    return !strcmp(value, "screen") ? 1 : 0;
+    return !strcmp(value, "game") ? 0 : 1;
 }
 bool native_save_settings(const CastConfig *cfg, unsigned language, bool show_timings, unsigned cpu_core,
                           unsigned capture_source) {

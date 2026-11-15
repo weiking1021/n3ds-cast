@@ -102,7 +102,7 @@ static inline int native_config_valid(const CastConfig *cfg) {
     return i == 8 && cfg->layout_mode >= 0 && cfg->layout_mode < LAYOUT_COUNT && cfg->scale_filter >= 0 &&
            cfg->scale_filter < FILTER_COUNT && cfg->stretch_mode >= 0 && cfg->stretch_mode < STRETCH_COUNT &&
            (cfg->jpeg_quality == NATIVE_QUALITY_AUTO || (cfg->jpeg_quality >= 30 && cfg->jpeg_quality <= 100)) &&
-           cfg->target_fps >= 5 && cfg->target_fps <= 30 && (cfg->show_osd == 0 || cfg->show_osd == 1) &&
+           cfg->target_fps >= 5 && cfg->target_fps <= 60 && (cfg->show_osd == 0 || cfg->show_osd == 1) &&
            (cfg->audio_enabled == 0 || cfg->audio_enabled == 1) &&
            (!cfg->audio_enabled || cfg->audio_kbps == 32 || cfg->audio_kbps == 64 || cfg->audio_kbps == 128);
 }

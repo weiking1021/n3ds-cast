@@ -57,6 +57,10 @@ int main(void) {
     assert(native_config_valid(&cfg));
     cfg.target_fps = 0;
     assert(!native_config_valid(&cfg));
+    cfg.target_fps = 60;
+    assert(native_config_valid(&cfg));
+    cfg.target_fps = 61;
+    assert(!native_config_valid(&cfg));
     cfg.target_fps = 30;
     cfg.jpeg_quality = NATIVE_QUALITY_AUTO;
     assert(native_config_valid(&cfg));
