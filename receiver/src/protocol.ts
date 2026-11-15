@@ -81,33 +81,24 @@ export interface AudioStopMessage {
   type: 'AUDIO_STOP';
 }
 
-/** Once a second: what the 3DS program measures, for the debug panel. All fields may be missing. */
+/**
+ * Once a second: what the 3DS program measures, for the debug panel. All fields may be missing. (The 3DS sends more
+ * than this; the page shows only these.)
+ */
 export interface StatsMessage {
   type: 'STATS';
-  fps?: number;
-  r?: number;
+  r?: number; // capture, encode and send time per frame, ms
   j?: number;
   t?: number;
   core?: number;
   fb?: number;
-  title?: string;
   rej?: number;
-  as?: number;
-  ak?: number;
-  ap?: number;
-  ar?: number;
-  an?: number;
   sent?: number;
   drop?: number;
-  c?: number[];
-  nz?: number[];
-  h?: number[];
   tn?: number;
   jc?: number;
   jj?: number;
   jb?: number;
-  sl?: number;
-  kb?: number;
   q?: number;
   qn?: number;
   qx?: number;

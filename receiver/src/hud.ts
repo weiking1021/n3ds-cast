@@ -9,8 +9,6 @@ function element<T extends HTMLElement>(id: string): T {
 
 const LAYOUT_CLASSES = ['mode-top', 'mode-bottom', 'mode-vertical', 'mode-side', 'mode-pip'];
 const LAYOUT_NAMES: MessageKey[] = ['mode.top', 'mode.bottom', 'mode.vertical', 'mode.side', 'mode.pip'];
-const AUDIO_STATE = ['off', 'waiting for game DSP', 'DSP layout unsupported', 'live'];
-const DSP_KIND = ['none', 'pipe table', 'std firmware 0x7FFE'];
 
 /** Everything the page shows besides the two screens: the splash, the OSD, the debug panel, the layout classes. */
 export class Hud {
@@ -119,27 +117,15 @@ export class Hud {
   /** The 3DS program's own numbers (once a second). */
   showStats(m: StatsMessage): void {
     this.lastQuality = this.qualityText(m);
-    const hex = (n: number | undefined) =>
-      n === undefined ? '-' : Number(n).toString(16).toUpperCase().padStart(4, '0');
     const tenths = (n: number | undefined) => (typeof n === 'number' ? (n / 10).toFixed(1) : '-'); // tenths of ms
-    const list = (a: number[] | undefined) => (Array.isArray(a) ? a : []);
     const num = (n: number | string | undefined) => (n === undefined ? '-' : n);
     const cpu = typeof m.tn === 'number' && typeof m.t === 'number' ? (m.t - m.tn / 10).toFixed(1) : '-';
     const lines = [
-      `R${num(m.r)} J${num(m.j)} T${num(m.t)} ms   ${num(m.fps)} FPS   ${this.qualityText(m)}`,
-      `T net ${tenths(m.tn)} / cpu ${cpu}   frame ${tenths(m.kb)} KB`,
+      `R${num(m.r)} J${num(m.j)} T${num(m.t)} ms`,
+      `T net ${tenths(m.tn)} / cpu ${cpu}`,
       `J conv ${tenths(m.jc)} / jpeg ${tenths(m.jj)} / b64 ${tenths(m.jb)}`,
       `core ${m.core || '-'}${m.fb ? ' (fell back)' : ''}  rejected ${num(m.rej)}  reconnects ${num(m.rc)}`,
-      `title ${num(m.title)}`,
-      `audio: ${(m.as !== undefined && AUDIO_STATE[m.as]) || num(m.as)}`,
-      ` layout: ${(m.ak !== undefined && DSP_KIND[m.ak]) || num(m.ak)}`,
-      ` probes ${num(m.ap)}  real ${num(m.ar)}  silent ${num(m.sl)}`,
-      ` sent ${num(m.sent)}  dropped ${num(m.drop)}`,
-      'DSP counters:',
-      ` ${list(m.c).map(hex).join(' ')}`,
-      'DSP non-zero /4096:',
-      ` ${list(m.nz).join(' ')}`,
-      `pipe hdr ${list(m.h)[0] ?? '-'}  valid ${list(m.h)[1] ?? '-'}`,
+      `audio sent ${num(m.sent)}  dropped ${num(m.drop)}`,
     ];
     this.debug.textContent = lines.join('\n');
   }
