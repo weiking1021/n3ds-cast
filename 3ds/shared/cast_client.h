@@ -28,6 +28,18 @@ typedef struct {
     int request_id;
     uint64_t last_ping_ms;
     bool peer_rects; // receiver answered CAPS with "rects":true: it composes RECT messages (partial screen updates)
+    // The PC receiver names a plain TCP port in its HELLO ("direct"): the pictures then go there, length-prefixed and
+    // without TLS (which costs the 3DS more CPU than the network). The TLS connection stays for everything else, and is
+    // the fallback if the direct one cannot be made or breaks.
+    int direct_fd;
+    unsigned direct_port;
+    bool direct_failed;       // the direct connection broke or could not be made
+    bool direct_was_ok;       // ... a picture went out over it at some point: then it is worth trying again
+    uint64_t direct_retry_at; // not before this time (the last cast_client_poll time base), ms
+    uint64_t poll_ms;         // the time of the last cast_client_poll
+    // The receiver sent "NEED_KEY": it has no picture to build on (a page just opened), the next picture must be a
+    // whole one. The caller clears it.
+    bool key_request;
     // Set by the caller before cast_client_connect_and_launch: stop a receiver app that is already running on the
     // TV (e.g. sent to the background by the Back key) so the launch brings a fresh one to the front. Leave it
     // false for automatic reconnects so a short Wi-Fi drop re-joins the running app without reloading it.
@@ -84,6 +96,7 @@ bool cast_client_send_json(CastClient *client, const char *json);
 /** Accumulated ARM11 ticks spent in send() (268111856 ticks per second). */
 extern volatile uint64_t cast_net_ticks;
 extern volatile uint64_t cast_write_ticks;
+extern volatile uint64_t cast_build_ticks; // time spent building the messages (JSON text, Cast framing)
 
 /**
  * Asks the receiver what it understands; it answers HELLO ("rects":true = partial screen updates). Tells it this

@@ -39,6 +39,7 @@ typedef struct {
     int show_osd;
     int audio_enabled; // 0=off, 1=440 Hz test tone (not other games' audio)
     int audio_kbps;    // 32/64/128, mono IMA ADPCM at 8/16/32 kHz
+    int link_kbps;     // network speed to plan the pictures for, KB/s: 0 = measure it, else 500..2000
 } CastConfig;
 
 void config_init_defaults(CastConfig *cfg);

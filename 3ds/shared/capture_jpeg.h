@@ -38,6 +38,13 @@ size_t capture_encode_3ds_bgr8_jpeg_420_rect(const uint8_t *src_bgr8, int column
                                              int height, int quality, uint8_t *out_jpeg, size_t out_capacity);
 
 /**
+ * Where the 4:2:0 encoder spends its time, in ARM11 ticks (all 0 on the host): every 16th MCU is timed, so
+ * [0] gathering the pixels (colour conversion), [1] the DCT, [2] DCT plus entropy coding of the six blocks,
+ * [3] how many MCUs were timed, [4] how many MCUs were encoded. Scale [0..2] by [4] / [3] for the whole picture.
+ */
+extern volatile uint64_t capture_jpeg_ticks[5];
+
+/**
  * Compress an upright RGB24 image (width x height, 3 bytes per pixel)
  * into a standard baseline YCbCr 4:4:4 JPEG in memory (ideal for crisp UI text).
  * Returns number of bytes written to out_jpeg, or 0 on error.

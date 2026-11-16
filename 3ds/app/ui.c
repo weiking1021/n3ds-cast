@@ -285,8 +285,9 @@ void native_ui_draw(const NativeUI *ui) {
                          false);
         }
     } else {
-        static const char *labels[] = {"TV IP",  "Screens",    "Filter",     "Aspect",   "Quality",  "Target FPS",
-                                       "TV OSD", "Game audio", "Audio rate", "Language", "CPU core", "Capture"};
+        static const char *labels[] = {"TV IP",      "Screens", "Filter",     "Aspect",     "Quality",
+                                       "Target FPS", "TV OSD",  "Game audio", "Audio rate", "Language",
+                                       "CPU core",   "Capture", "Network"};
         static const char *layouts[] = {"Top", "Bottom", "Vertical", "Side by side", "PiP"};
         char values[NATIVE_SETTINGS_COUNT][64] = {0};
         snprintf(values[0], 64, "%s", ui->cfg.tv_ip);
@@ -304,8 +305,13 @@ void native_ui_draw(const NativeUI *ui) {
         snprintf(values[8], 64, "%d kbps", ui->cfg.audio_kbps);
         snprintf(values[9], 64, "%s", native_language_name(language));
         static const char *cores[] = {"Auto", "Core 1", "Core 2"};
-        snprintf(values[10], 64, "%s", cores[ui->cpu_core < 3 ? ui->cpu_core : 0]);
+        snprintf(values[10], 64, "%s", cores[ui->cpu_core < NATIVE_CORE_COUNT ? ui->cpu_core : 0]);
         snprintf(values[11], 64, "%s", ui->capture_source ? "Always" : "Games only");
+        if (ui->cfg.link_kbps) {
+            snprintf(values[12], 64, "%d.%02d MB/s", ui->cfg.link_kbps / 1000, ui->cfg.link_kbps % 1000 / 10);
+        } else {
+            snprintf(values[12], 64, "Auto");
+        }
         unsigned first = (ui->selected_setting / NATIVE_SETTINGS_PER_PAGE) * NATIVE_SETTINGS_PER_PAGE;
         for (unsigned i = first; i < NATIVE_SETTINGS_COUNT && i < first + NATIVE_SETTINGS_PER_PAGE; i++) {
             unsigned y = 46 + (i - first) * 40;

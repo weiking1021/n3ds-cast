@@ -1,6 +1,16 @@
 #include "capture_jpeg.h"
 #include <string.h>
 #include <stdint.h>
+#ifdef __3DS__
+#include <3ds.h>
+#define JPEG_TICK() svcGetSystemTick()
+#else
+#define JPEG_TICK() 0ull
+#endif
+
+// Where the time of the 4:2:0 encoder goes (see capture_jpeg.h): only every 16th MCU is timed.
+volatile uint64_t capture_jpeg_ticks[5];
+static uint64_t *dct_acc; // when set, encode_block adds the time of its DCT here
 
 void capture_convert_3ds_bgr8_to_rgb24(const uint8_t *src_bgr8, uint8_t *dst_rgb24, int width, int height) {
     for (int y = 0; y < height; y++) {
@@ -271,7 +281,13 @@ static void encode_block(JpegBitWriter *bw, int32_t *block, const uint32_t *inv_
     if (flat) {
         dc_coef = first * 8; /* exact result of fdct_int8x8 for a constant block */
     } else {
-        fdct_int8x8(block);
+        if (dct_acc) {
+            uint64_t started = JPEG_TICK();
+            fdct_int8x8(block);
+            *dct_acc += JPEG_TICK() - started;
+        } else {
+            fdct_int8x8(block);
+        }
         dc_coef = block[0];
     }
 
@@ -299,11 +315,13 @@ static void encode_block(JpegBitWriter *bw, int32_t *block, const uint32_t *inv_
         int idx = unzig_index[k];
         int32_t v = block[idx];
         int32_t sgn = v >> 31;
-        uint32_t q = (((uint32_t)((v ^ sgn) - sgn)) * inv_qtable[idx] + 32768u) >> 16;
-        if (q == 0) {
+        uint32_t magnitude = (uint32_t)((v ^ sgn) - sgn);
+        // quantised to zero (no multiplication needed to tell): magnitude * inv + 32768 < 65536
+        if (magnitude <= inv_qtable[64 + idx]) {
             zero_run++;
             continue;
         }
+        uint32_t q = (magnitude * inv_qtable[idx] + 32768u) >> 16;
         while (zero_run >= 16) {
             bw_put_bits(bw, ac_ht->code[0xF0], ac_ht->size[0xF0]);
             zero_run -= 16;
@@ -437,6 +455,9 @@ static void init_quant_tables(int quality, uint8_t *dqt_lum, uint8_t *dqt_chr, u
         // Precompute 16-bit reciprocal for division-free quantization in natural order
         inv_lum[i] = (uint32_t)((65536 + (l >> 1)) / l);
         inv_chr[i] = (uint32_t)((65536 + (c >> 1)) / c);
+        // the largest magnitude that still quantises to zero: m * inv + 32768 < 65536  <=>  m <= 32767 / inv
+        inv_lum[64 + i] = 32767u / inv_lum[i];
+        inv_chr[64 + i] = 32767u / inv_chr[i];
     }
 }
 
@@ -504,7 +525,7 @@ static inline void gather_mcu420(const uint8_t *src_bgr8, int height, int mcu_x,
 static size_t encode_420_rect(const uint8_t *src_bgr8, int column_rows, int x0, int y0, int width, int height,
                               int quality, uint8_t *out_jpeg, size_t out_capacity) {
     uint8_t dqt_lum[64], dqt_chr[64];
-    uint32_t inv_lum[64], inv_chr[64];
+    uint32_t inv_lum[128], inv_chr[128]; // [64..127]: the largest magnitude that quantises to zero
     init_quant_tables(quality, dqt_lum, dqt_chr, inv_lum, inv_chr);
 
     HuffTable dc_lum_ht, dc_chr_ht, ac_lum_ht, ac_chr_ht;
@@ -521,16 +542,29 @@ static size_t encode_420_rect(const uint8_t *src_bgr8, int column_rows, int x0, 
     int32_t blk_cb[64], blk_cr[64];
 
     // Process 16x16 MCUs directly from 3DS column-major BGR8 framebuffer
+    unsigned mcu_count = 0;
     for (int mcu_y = 0; mcu_y < height; mcu_y += 16) {
         for (int mcu_x = 0; mcu_x < width; mcu_x += 16) {
+            const bool timed = (mcu_count++ & 15u) == 0; // every 16th MCU is timed (see capture_jpeg_ticks)
+            uint64_t dct_ticks = 0, t0 = timed ? JPEG_TICK() : 0;
             gather_mcu420(src_bgr8, column_rows, x0 + mcu_x, y0 + mcu_y, blk_y00, blk_y01, blk_y10, blk_y11, blk_cb,
                           blk_cr);
+            uint64_t t1 = timed ? JPEG_TICK() : 0;
+            dct_acc = timed ? &dct_ticks : NULL;
             encode_block(&bw, blk_y00, inv_lum, &dc_y, &dc_lum_ht, &ac_lum_ht);
             encode_block(&bw, blk_y01, inv_lum, &dc_y, &dc_lum_ht, &ac_lum_ht);
             encode_block(&bw, blk_y10, inv_lum, &dc_y, &dc_lum_ht, &ac_lum_ht);
             encode_block(&bw, blk_y11, inv_lum, &dc_y, &dc_lum_ht, &ac_lum_ht);
             encode_block(&bw, blk_cb, inv_chr, &dc_cb, &dc_chr_ht, &ac_chr_ht);
             encode_block(&bw, blk_cr, inv_chr, &dc_cr, &dc_chr_ht, &ac_chr_ht);
+            dct_acc = NULL;
+            if (timed) {
+                capture_jpeg_ticks[0] += t1 - t0;
+                capture_jpeg_ticks[1] += dct_ticks;
+                capture_jpeg_ticks[2] += JPEG_TICK() - t1;
+                capture_jpeg_ticks[3]++;
+            }
+            capture_jpeg_ticks[4]++;
         }
     }
 
@@ -560,7 +594,7 @@ size_t capture_encode_3ds_bgr8_jpeg_420_rect(const uint8_t *src_bgr8, int column
 size_t capture_encode_jpeg_rgb24(const uint8_t *rgb24, int width, int height, int quality, uint8_t *out_jpeg,
                                  size_t out_capacity) {
     uint8_t dqt_lum[64], dqt_chr[64];
-    uint32_t inv_lum[64], inv_chr[64];
+    uint32_t inv_lum[128], inv_chr[128]; // [64..127]: the largest magnitude that quantises to zero
     init_quant_tables(quality, dqt_lum, dqt_chr, inv_lum, inv_chr);
 
     HuffTable dc_lum_ht, dc_chr_ht, ac_lum_ht, ac_chr_ht;

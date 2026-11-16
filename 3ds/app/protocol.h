@@ -10,7 +10,7 @@
 #endif
 #define NATIVE_PORT "n3dcast"
 #define NATIVE_MAGIC 0x4E334443u
-#define NATIVE_VERSION 33u
+#define NATIVE_VERSION 34u
 // jpeg_quality 0 = automatic: the encoder adapts it to the scene (see encoder_thread).
 #define NATIVE_QUALITY_AUTO 0
 #define NATIVE_MEMORY_LIMIT (8u * 1024 * 1024)
@@ -111,7 +111,8 @@ static inline int native_config_valid(const CastConfig *cfg) {
            (cfg->jpeg_quality == NATIVE_QUALITY_AUTO || (cfg->jpeg_quality >= 30 && cfg->jpeg_quality <= 100)) &&
            cfg->target_fps >= 5 && cfg->target_fps <= 60 && (cfg->show_osd == 0 || cfg->show_osd == 1) &&
            (cfg->audio_enabled == 0 || cfg->audio_enabled == 1) &&
-           (!cfg->audio_enabled || cfg->audio_kbps == 32 || cfg->audio_kbps == 64 || cfg->audio_kbps == 128);
+           (!cfg->audio_enabled || cfg->audio_kbps == 32 || cfg->audio_kbps == 64 || cfg->audio_kbps == 128) &&
+           (cfg->link_kbps == 0 || (cfg->link_kbps >= 500 && cfg->link_kbps <= 2000));
 }
 static inline int native_start_valid(const NativeStartConfig *start) {
     return start && native_config_valid(&start->cast) && start->cpu_core < NATIVE_CORE_COUNT &&

@@ -1,5 +1,5 @@
 #pragma once
-#define NATIVE_SETTINGS_COUNT 12u
+#define NATIVE_SETTINGS_COUNT 13u
 #define NATIVE_SETTINGS_PER_PAGE 4u
 #define NATIVE_TVS_PER_PAGE 2u
 static inline int native_ui_tab_at(unsigned x, unsigned y) {

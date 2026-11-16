@@ -21,11 +21,14 @@
 volatile uint64_t cast_net_ticks = 0;
 // Time spent inside mbedtls_ssl_write (includes send()): write - net = encryption and copies.
 volatile uint64_t cast_write_ticks = 0;
+// Time spent building the messages (JSON text with the picture, the Cast framing): not the network, not encryption.
+volatile uint64_t cast_build_ticks = 0;
 
 #define TX_BUF_SIZE (128 * 1024)
 #define RX_BUF_SIZE (32 * 1024)
 #define CONNECT_POLL_STEPS 40 // the TCP connect gets 40 x 100 ms
 #define CONNECT_POLL_MS 100
+#define DIRECT_RETRY_MS 5000         // a direct connection that broke is tried again after this long
 #define SEND_BUFFER_SIZE (64 * 1024) // fit a whole JPEG frame per burst
 #define HANDSHAKE_RETRIES 400        // the TLS handshake gets 400 x 5 ms
 #define HANDSHAKE_SLEEP_US 5000
@@ -83,6 +86,7 @@ static int bio_recv(void *ctx, unsigned char *buf, size_t len) {
 bool cast_client_init(CastClient *client) {
     memset(client, 0, sizeof(CastClient));
     client->sock_fd = -1;
+    client->direct_fd = -1;
     client->state = CAST_STATE_DISCONNECTED;
     snprintf(client->status_msg, sizeof(client->status_msg), "Idle (Ready)");
 
@@ -155,7 +159,20 @@ bool cast_client_init(CastClient *client) {
     return true;
 }
 
+static void direct_close(CastClient *client) {
+    if (client->direct_fd >= 0) {
+        close(client->direct_fd);
+        client->direct_fd = -1;
+    }
+}
+
 void cast_client_disconnect(CastClient *client) {
+    direct_close(client);
+    client->direct_port = 0;
+    client->direct_failed = false;
+    client->direct_was_ok = false;
+    client->direct_retry_at = 0;
+    client->key_request = false;
     if (client->sock_fd >= 0) {
         if (client->ssl_setup_done) {
             mbedtls_ssl_close_notify(&client->ssl);
@@ -287,8 +304,14 @@ static bool tls_write_all(CastClient *client, const uint8_t *data, size_t len) {
 }
 
 static bool send_cast_packet(CastClient *client, const char *dest_id, const char *ns, const char *json_payload) {
+#ifdef __3DS__
+    uint64_t build_start = svcGetSystemTick();
+#endif
     size_t pkt_len = cast_proto_encode_utf8(client->tx_buf, client->tx_buf_cap, CAST_DEFAULT_SOURCE, dest_id, ns,
                                             json_payload, strlen(json_payload));
+#ifdef __3DS__
+    cast_build_ticks += svcGetSystemTick() - build_start;
+#endif
     if (pkt_len == 0) {
         return false;
     }
@@ -625,6 +648,7 @@ bool cast_client_poll(CastClient *client, uint64_t now_ms) {
     if (client->state != CAST_STATE_STREAMING || client->sock_fd < 0) {
         return false;
     }
+    client->poll_ms = now_ms;
 
     CastMessage msg;
     while (read_one_cast_message(client, &msg, 0)) {
@@ -645,6 +669,14 @@ bool cast_client_poll(CastClient *client, uint64_t now_ms) {
             if (strstr(msg.payload_utf8, "\"rects\":true")) {
                 client->peer_rects = true;
             }
+            const char *direct = strstr(msg.payload_utf8, "\"direct\":");
+            if (direct) {
+                long port = strtol(direct + 9, NULL, 10);
+                client->direct_port = port > 0 && port < 65536 ? (unsigned)port : 0;
+            }
+        } else if (strcmp(msg.ns, CAST_NS_CUSTOM) == 0 && msg.payload_utf8 &&
+                   strstr(msg.payload_utf8, "\"NEED_KEY\"")) {
+            client->key_request = true; // the page has no picture to build on (it was just opened)
         }
         cast_proto_free_message(&msg);
     }
@@ -825,9 +857,90 @@ bool cast_client_send_caps(CastClient *client, const CastConfig *cfg) {
     // The receiver answers with HELLO listing what it understands: "rects":true = partial screen updates. The
     // message also carries this program's version, which the receiver page shows next to its own, and the language
     // this program is set to, which the page shows its texts in.
-    char json[96];
-    snprintf(json, sizeof(json), "{\"type\":\"CAPS\",\"rects\":1,\"ver\":\"" NATIVE_APP_VERSION "\"%s}", lang);
+    char json[192];
+    snprintf(json, sizeof(json),
+             "{\"type\":\"CAPS\",\"rects\":1,\"ver\":\"" NATIVE_APP_VERSION "\",\"build\":\"" __DATE__ " " __TIME__
+             "\"%s}",
+             lang);
     return send_cast_packet(client, client->transport_id, CAST_NS_CUSTOM, json);
+}
+
+// Opens the plain TCP connection for the pictures (see CastClient.direct_port).
+static bool direct_open(CastClient *client, const CastConfig *cfg) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return false;
+    }
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)client->direct_port);
+    if (inet_pton(AF_INET, cfg->tv_ip, &addr.sin_addr) <= 0) {
+        close(fd);
+        return false;
+    }
+    int res = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+    if (res < 0 && errno != EINPROGRESS && errno != EWOULDBLOCK) {
+        close(fd);
+        return false;
+    }
+    struct pollfd pfd = {fd, POLLOUT, 0};
+    bool connected = false;
+    for (int step = 0; step < 10 && !client_cancelled(client); step++) {
+        int ready = poll(&pfd, 1, 200);
+        if (ready > 0) {
+            connected = true;
+            break;
+        }
+        if (ready < 0 && errno != EINTR) {
+            break;
+        }
+    }
+    if (!connected) {
+        close(fd);
+        return false;
+    }
+    int one = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    int sndbuf = SEND_BUFFER_SIZE;
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+    client->direct_fd = fd;
+    return true;
+}
+
+// Sends everything on the direct connection (the time counts as network and as "write", there is no TLS in it).
+static bool direct_send_all(CastClient *client, const uint8_t *data, size_t len) {
+    size_t sent = 0;
+    int retries = 0;
+    while (sent < len) {
+        if (client_cancelled(client)) {
+            return false;
+        }
+#ifdef __3DS__
+        uint64_t start = svcGetSystemTick();
+#endif
+        ssize_t r = send(client->direct_fd, data + sent, len - sent, 0);
+#ifdef __3DS__
+        uint64_t spent = svcGetSystemTick() - start;
+        cast_net_ticks += spent;
+        cast_write_ticks += spent;
+#endif
+        if (r > 0) {
+            sent += (size_t)r;
+            retries = 0;
+        } else if (r < 0 && (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINPROGRESS)) {
+            if (++retries > 250) {
+                return false;
+            }
+            struct pollfd pfd = {client->direct_fd, POLLOUT, 0};
+            poll(&pfd, 1, 20);
+        } else {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool cast_client_send_rects(CastClient *client, const CastConfig *cfg, const CastRect *rects, unsigned count) {
@@ -843,9 +956,22 @@ bool cast_client_send_rects(CastClient *client, const CastConfig *cfg, const Cas
     }
     char cj[160];
     cfg_json(cj, sizeof(cj), cfg);
-    char *json = (char *)malloc(CAST_PART_CHARS + 512);
-    if (!json) {
+    // The message is built after 4 spare bytes: on the direct connection they hold its length.
+    char *buffer = (char *)malloc(CAST_PART_CHARS + 516);
+    if (!buffer) {
         return false;
+    }
+    char *json = buffer + 4;
+    // Not reachable at all (a firewall, say): everything stays on the Cast connection. One that worked and then broke
+    // (a Wi-Fi hiccup) is tried again after a few seconds, so a single hiccup does not end the direct pictures.
+    if (client->direct_port && client->direct_fd < 0 &&
+        (!client->direct_failed || (client->direct_was_ok && client->poll_ms >= client->direct_retry_at))) {
+        if (direct_open(client, cfg)) {
+            client->direct_failed = false;
+        } else {
+            client->direct_failed = true;
+            client->direct_retry_at = client->poll_ms + DIRECT_RETRY_MS;
+        }
     }
     bool ok = true;
     size_t message = 0;
@@ -858,6 +984,9 @@ bool cast_client_send_rects(CastClient *client, const CastConfig *cfg, const Cas
                 n = CAST_PART_CHARS;
             }
             message++;
+#ifdef __3DS__
+            uint64_t build_start = svcGetSystemTick();
+#endif
             int h = snprintf(
                 json, 512,
                 "{\"type\":\"RECT\",\"s\":\"%s\",\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u,\"i\":%u,\"n\":%u%s%s%s,\"d\":\"",
@@ -869,9 +998,30 @@ bool cast_client_send_rects(CastClient *client, const CastConfig *cfg, const Cas
             }
             memcpy(json + h, r->b64 + off, n);
             memcpy(json + h + n, "\"}", 3);
-            ok = send_cast_packet(client, client->transport_id, CAST_NS_CUSTOM, json);
+#ifdef __3DS__
+            cast_build_ticks += svcGetSystemTick() - build_start;
+#endif
+            bool sent_direct = false;
+            if (client->direct_fd >= 0) {
+                uint32_t length = (uint32_t)(h + n + 2);
+                buffer[0] = (char)(length >> 24);
+                buffer[1] = (char)(length >> 16);
+                buffer[2] = (char)(length >> 8);
+                buffer[3] = (char)length;
+                sent_direct = direct_send_all(client, (const uint8_t *)buffer, 4 + (size_t)length);
+                if (!sent_direct) {
+                    // The stream is cut in the middle of a message (the receiver drops the unfinished one): close the
+                    // connection and send this message, and all after it, over the Cast one.
+                    direct_close(client);
+                    client->direct_failed = true;
+                    client->direct_retry_at = client->poll_ms + DIRECT_RETRY_MS;
+                } else {
+                    client->direct_was_ok = true;
+                }
+            }
+            ok = sent_direct || send_cast_packet(client, client->transport_id, CAST_NS_CUSTOM, json);
         }
     }
-    free(json);
+    free(buffer);
     return ok;
 }

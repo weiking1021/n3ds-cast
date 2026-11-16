@@ -92,6 +92,10 @@ extern NativeVideoCache video[2];
 extern char *b64[2];
 // Set by the sender once the receiver said it composes rectangles; the encoder then produces partial updates.
 extern atomic_bool rects_mode;
+extern atomic_bool key_request; // the receiver has no picture to build on: the next picture is a whole one
+extern atomic_uint stat_budget_pct, stat_budget_bytes; // the automatic quality's byte budget (shown on the TV)
+extern atomic_uint stat_link_rate;                     // bytes of text per second the sender measured (0 = not yet)
+extern atomic_uint stat_link_used;                     // the link speed the budget is planned with, bytes per second
 extern atomic_uint stat_rect_frames, stat_full_frames;
 extern atomic_uint stat_q_min, stat_q_max, stat_q_now; // JPEG quality used in the last second (for the TV OSD)
 extern LightLock enc_lock;                             // guards enc_cfg and enc_source

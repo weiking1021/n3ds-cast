@@ -10,11 +10,11 @@
 #define IDLE_SLEEP_NS 20000000LL // no stream wanted: poll the request flags this often
 #define FRAME_WAIT_NS 1000000LL  // nothing to send yet: look at the slots again after 1 ms
 #define STATS_PANEL_TITLE_SIZE 224
-#define STATS_JSON_SIZE 900
+#define STATS_JSON_SIZE 1100
 
 // Counters of the last panel update, to turn the running totals into per-frame averages.
 typedef struct {
-    unsigned long long net, conv, jpeg, b64, write, bytes, cols_total[2], cols_same[2];
+    unsigned long long net, conv, jpeg, b64, write, build, bytes, cols_total[2], cols_same[2], phase[5];
     unsigned frames;
 } StatsWindow;
 
@@ -96,6 +96,7 @@ static bool connect_session(StreamSession *s, unsigned current) {
     LightLock_Unlock(&state_lock);
     s->applied = current;
     atomic_store(&rects_mode, false); // renegotiated per connection
+    atomic_store(&stat_link_rate, 0); // measured again on every connection
     s->stats_since = osGetTime();
     s->stats_frames = s->send_ms = 0;
     atomic_store(&stat_capture_ms, 0);
@@ -200,6 +201,22 @@ static void format_panel_title(StreamSession *s, const NativeStatus *st, const u
     s->send_max = s->gap_max = 0;
 }
 
+// The cipher suite of the TLS connection (the part after "WITH-", letters, digits and '-' only) for the debug panel.
+static void cipher_short(const CastClient *client, char *out, size_t size) {
+    const char *name = cast_client_cipher(client);
+    const char *with = strstr(name, "WITH-");
+    if (with) {
+        name = with + 5;
+    }
+    size_t n = 0;
+    for (; name[n] && n + 1 < size; n++) {
+        char c = name[n];
+        bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+        out[n] = ok ? c : '-';
+    }
+    out[n] = '\0';
+}
+
 // Once a second: the whole pipeline's numbers for the TV debug panel. False: the link broke.
 static bool send_stats(StreamSession *s) {
     NativeStatus st;
@@ -227,9 +244,29 @@ static bool send_stats(StreamSession *s) {
     }
     unsigned long wr = tenth_ms_per_frame(cast_write_ticks, &w->write, frames),
                   tn = tenth_ms_per_frame(cast_net_ticks, &w->net, frames),
+                  bd = tenth_ms_per_frame(cast_build_ticks, &w->build, frames),
                   jc = tenth_ms_per_frame(video[0].t_convert + video[1].t_convert, &w->conv, frames),
                   jj = tenth_ms_per_frame(video[0].t_jpeg + video[1].t_jpeg, &w->jpeg, frames),
                   jb = tenth_ms_per_frame(video[0].t_b64 + video[1].t_b64, &w->b64, frames);
+    // Where the JPEG time goes, tenths of ms per frame: gathering the pixels, the DCT, entropy coding (only every
+    // 16th MCU is timed in the encoder; scaled up to all of them).
+    unsigned long pg = 0, pd = 0, pe = 0;
+    {
+        unsigned long long t[5];
+        for (unsigned k = 0; k < 5; k++) {
+            t[k] = capture_jpeg_ticks[k];
+        }
+        unsigned long long sampled = t[3] - w->phase[3], all = t[4] - w->phase[4];
+        if (sampled && all) {
+            pg = (unsigned long)((t[0] - w->phase[0]) * all / sampled * 10ULL / TICKS_PER_MS / frames);
+            pd = (unsigned long)((t[1] - w->phase[1]) * all / sampled * 10ULL / TICKS_PER_MS / frames);
+            pe = (unsigned long)(((t[2] - w->phase[2]) - (t[1] - w->phase[1])) * all / sampled * 10ULL / TICKS_PER_MS /
+                                 frames);
+        }
+        for (unsigned k = 0; k < 5; k++) {
+            w->phase[k] = t[k];
+        }
+    }
     unsigned long kb = (unsigned long)((s->sent_bytes - w->bytes) * 10ULL / 1024ULL / frames);
     w->bytes = s->sent_bytes;
     w->frames = st.frames;
@@ -240,18 +277,23 @@ static bool send_stats(StreamSession *s) {
     if (q_hi == 0) {
         q_lo = q_hi = q_now; // no frame in the last second: repeat the last quality
     }
+    char cipher[48];
+    cipher_short(&s->client, cipher, sizeof(cipher));
     char json[STATS_JSON_SIZE];
-    snprintf(json, sizeof(json),
-             "{\"type\":\"STATS\",\"fps\":%lu,\"r\":%lu,\"j\":%lu,\"t\":%lu,\"core\":%lu,\"fb\":%lu,"
-             "\"title\":\"%s\",\"rej\":%lu,\"as\":%lu,\"ak\":%u,\"ap\":%u,\"ar\":%u,\"an\":%u,"
-             "\"sent\":%lu,\"drop\":%lu,\"c\":[%u,%u,%u,%u],\"nz\":[%u,%u,%u,%u],\"h\":[%u,%u],"
-             "\"tn\":%lu,\"jc\":%lu,\"jj\":%lu,\"jb\":%lu,\"sl\":%u,\"kb\":%lu,\"q\":%u,\"qn\":%u,\"qx\":%u,\"rc\":%u}",
-             (unsigned long)st.fps, (unsigned long)st.capture_ms, (unsigned long)st.encode_ms,
-             (unsigned long)st.send_ms, (unsigned long)st.worker_core, (unsigned long)st.core_fallback, title,
-             (unsigned long)st.rejected, (unsigned long)st.audio_state, kind, probes, reads, pushed,
-             (unsigned long)st.audio_packets, (unsigned long)st.audio_dropped, d.counter[0], d.counter[1], d.counter[2],
-             d.counter[3], dg[0], dg[1], dg[2], dg[3], dg[4], dg[5], tn, jc, jj, jb, silent, kb, q_now, q_lo, q_hi,
-             atomic_load(&stat_reconnects));
+    snprintf(
+        json, sizeof(json),
+        "{\"type\":\"STATS\",\"fps\":%lu,\"r\":%lu,\"j\":%lu,\"t\":%lu,\"core\":%lu,\"fb\":%lu,"
+        "\"title\":\"%s\",\"rej\":%lu,\"as\":%lu,\"ak\":%u,\"ap\":%u,\"ar\":%u,\"an\":%u,"
+        "\"sent\":%lu,\"drop\":%lu,\"c\":[%u,%u,%u,%u],\"nz\":[%u,%u,%u,%u],\"h\":[%u,%u],"
+        "\"tn\":%lu,\"jc\":%lu,\"jj\":%lu,\"jb\":%lu,\"sl\":%u,\"kb\":%lu,\"q\":%u,\"qn\":%u,\"qx\":%u,\"rc\":%u,\"bp\":%u,\"bb\":%u,\"wr\":%lu,\"bd\":%lu,\"ci\":\"%s\",\"lk\":%u,\"lm\":%u,\"la\":%u,\"pg\":%lu,\"pd\":%lu,\"pe\":%lu}",
+        (unsigned long)st.fps, (unsigned long)st.capture_ms, (unsigned long)st.encode_ms, (unsigned long)st.send_ms,
+        (unsigned long)st.worker_core, (unsigned long)st.core_fallback, title, (unsigned long)st.rejected,
+        (unsigned long)st.audio_state, kind, probes, reads, pushed, (unsigned long)st.audio_packets,
+        (unsigned long)st.audio_dropped, d.counter[0], d.counter[1], d.counter[2], d.counter[3], dg[0], dg[1], dg[2],
+        dg[3], dg[4], dg[5], tn, jc, jj, jb, silent, kb, q_now, q_lo, q_hi, atomic_load(&stat_reconnects),
+        atomic_load(&stat_budget_pct), atomic_load(&stat_budget_bytes), wr, bd, cipher,
+        atomic_load(&stat_link_used) / 1000, atomic_load(&stat_link_rate) / 1000, s->active.link_kbps == 0 ? 1u : 0u,
+        pg, pd, pe);
     if (!cast_client_send_json(&s->client, json)) {
         cast_client_disconnect(&s->client);
         stream_retry(s->applied, "Stats send failed");
@@ -290,6 +332,14 @@ static bool transmit_slot(StreamSession *s, const FrameSlot *slot) {
 static void account_frame(StreamSession *s, unsigned slot_bytes, uint64_t sent_at) {
     uint64_t done = osGetTime();
     unsigned send_time = (unsigned)(done - sent_at);
+    // How fast the link takes pictures (bytes of text per second while a picture is being sent), smoothed. Small pictures
+    // say little (their time is mostly fixed costs), so only the bigger ones count. The encoder sizes its pictures by it.
+    if (slot_bytes >= 6000 && send_time > 0) {
+        unsigned rate = (unsigned)((uint64_t)slot_bytes * 1000 / send_time);
+        rate = rate < 100000 ? 100000 : rate > 6000000 ? 6000000 : rate;
+        unsigned old = atomic_load(&stat_link_rate);
+        atomic_store(&stat_link_rate, old ? (old * 7 + rate) / 8 : rate);
+    }
     if (send_time > s->send_max) {
         s->send_max = send_time;
     }
@@ -380,6 +430,10 @@ void stream_worker(void *argument) {
         }
         atomic_store(&rects_mode,
                      s.client.peer_rects); // every pass: the receiver's HELLO may arrive while the picture is still
+        if (s.client.key_request) {
+            s.client.key_request = false;
+            atomic_store(&key_request, true);
+        }
         FrameSlot *slot = take_ready_slot(atomic_load(&enc_epoch));
         if (!slot) {
             svcSleepThread(FRAME_WAIT_NS);

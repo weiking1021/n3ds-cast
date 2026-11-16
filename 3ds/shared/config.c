@@ -16,6 +16,7 @@ void config_init_defaults(CastConfig *cfg) {
     cfg->show_osd = 0;
     cfg->audio_enabled = 0;
     cfg->audio_kbps = 64;
+    cfg->link_kbps = 0; // automatic
 }
 
 static void trim_whitespace(char *str) {
@@ -97,6 +98,11 @@ bool config_load(CastConfig *cfg, const char *path) {
             cfg->show_osd = atoi(val) ? 1 : 0;
         } else if (strcmp(key, "audio_enabled") == 0) {
             cfg->audio_enabled = atoi(val) ? 1 : 0;
+        } else if (strcmp(key, "link_kbps") == 0) {
+            int v = atoi(val);
+            if (v == 0 || (v >= 500 && v <= 2000)) {
+                cfg->link_kbps = v;
+            }
         } else if (strcmp(key, "audio_kbps") == 0) {
             int v = atoi(val);
             if (v == 32 || v == 64 || v == 128) {
@@ -132,6 +138,7 @@ bool config_save(const CastConfig *cfg, const char *path) {
     fprintf(fp, "show_osd=%d\n", cfg->show_osd);
     fprintf(fp, "audio_enabled=%d\n", cfg->audio_enabled);
     fprintf(fp, "audio_kbps=%d\n", cfg->audio_kbps);
+    fprintf(fp, "link_kbps=%d\n", cfg->link_kbps);
 
     fclose(fp);
     return true;

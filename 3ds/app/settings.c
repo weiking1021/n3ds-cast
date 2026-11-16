@@ -33,7 +33,8 @@ void native_load_settings(CastConfig *cfg) {
     };
     struct Setting fields[] = {{"layout_mode", &cfg->layout_mode, 0, 4},   {"scale_filter", &cfg->scale_filter, 0, 1},
                                {"stretch_mode", &cfg->stretch_mode, 0, 1}, {"jpeg_quality", &cfg->jpeg_quality, 0, 100},
-                               {"target_fps", &cfg->target_fps, 5, 60},    {"show_osd", &cfg->show_osd, 0, 1}};
+                               {"target_fps", &cfg->target_fps, 5, 60},    {"show_osd", &cfg->show_osd, 0, 1},
+                               {"link_kbps", &cfg->link_kbps, 0, 2000}};
     char line[256];
     while (fgets(line, sizeof(line), file)) {
         char *key = trim(line);
@@ -157,6 +158,9 @@ unsigned native_load_cpu_core(void) {
     }
     return !strcmp(value, "1") ? 1 : !strcmp(value, "2") ? 2 : 0;
 }
+static const char *core_text(unsigned cpu_core) {
+    return cpu_core == 1 ? "1" : cpu_core == 2 ? "2" : "auto";
+}
 unsigned native_load_capture_source(void) {
     char value[16];
     if (!read_value("capture_source", value, sizeof(value))) {
@@ -176,10 +180,7 @@ bool native_save_settings(const CastConfig *cfg, unsigned language, bool show_ti
     }
     bool ok = fprintf(file, "audio_source=%s\nui_language=%s\nshow_timings=%d\ncpu_core=%s\ncapture_source=%s\n",
                       cfg->audio_enabled ? "game" : "off", native_language_tag(language), show_timings ? 1 : 0,
-                      cpu_core == 1   ? "1"
-                      : cpu_core == 2 ? "2"
-                                      : "auto",
-                      capture_source == 1 ? "screen" : "game") > 0;
+                      core_text(cpu_core), capture_source == 1 ? "screen" : "game") > 0;
     if (fclose(file) != 0) {
         ok = false;
     }
@@ -197,10 +198,7 @@ bool native_save_settings(const CastConfig *cfg, unsigned language, bool show_ti
     }
     ok = fprintf(file, "audio_source=%s\nui_language=%s\nshow_timings=%d\ncpu_core=%s\ncapture_source=%s\n",
                  cfg->audio_enabled ? "game" : "off", native_language_tag(language), show_timings ? 1 : 0,
-                 cpu_core == 1   ? "1"
-                 : cpu_core == 2 ? "2"
-                                 : "auto",
-                 capture_source == 1 ? "screen" : "game") > 0;
+                 core_text(cpu_core), capture_source == 1 ? "screen" : "game") > 0;
     if (fclose(file) != 0) {
         ok = false;
     }

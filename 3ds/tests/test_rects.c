@@ -359,7 +359,7 @@ static void test_cache(void) {
     assert(native_video_encode(&c, &f, raw, sizeof(raw), 70, jpeg, sizeof(jpeg)) == 1 && c.rect_count == 0);
     // a quality change is a whole screen
     assert(native_video_encode(&c, &f, raw, sizeof(raw), 75, jpeg, sizeof(jpeg)) == 1);
-    // keyframe: after the interval even a one-tile change goes out as a whole screen
+    // no periodic keyframe: however long ago the last whole screen was, a one-tile change is just a rectangle
     for (int x = 0; x < 16; x++) {
         for (int y = 0; y < 16; y++) {
             uint8_t *p = img + ((size_t)x * 240 + (239 - y)) * 3;
@@ -367,8 +367,8 @@ static void test_cache(void) {
         }
     }
     raw_from(img, raw, 400);
-    c.now_ms = c.last_full_ms + NATIVE_KEYFRAME_MS;
-    assert(native_video_encode(&c, &f, raw, sizeof(raw), 75, jpeg, sizeof(jpeg)) == 1);
+    c.now_ms = c.last_full_ms + 600000;
+    assert(native_video_encode(&c, &f, raw, sizeof(raw), 75, jpeg, sizeof(jpeg)) == 2 && c.rect_count == 1);
     // partial output off (the default): always whole screens
     c.partial = false;
     for (int x = 100; x < 116; x++) {
@@ -447,13 +447,17 @@ static void test_auto(void) {
     assert(native_video_encode(&c, &f, raw, sizeof(raw), 100, jpeg, sizeof(jpeg)) == 1);
     unsigned low = c.chosen;
     assert(low <= 60 && c.picture_q == low && c.k_tile > 0);
-    // nothing moves: the budget for a one-off sharpening is large, the picture is re-encoded better, once
-    int sharpened = native_video_encode(&c, &f, raw, sizeof(raw), 100, jpeg, sizeof(jpeg));
-    assert(sharpened == 1 && c.chosen > low && c.picture_q == c.chosen);
-    assert(native_video_encode(&c, &f, raw, sizeof(raw), 100, jpeg, sizeof(jpeg)) == 0 || c.chosen == c.picture_q);
-    while (native_video_encode(&c, &f, raw, sizeof(raw), 100, jpeg, sizeof(jpeg)) == 1)
-        ; // settles
-    assert(c.picture_q >= 70);
+    // nothing moves: the picture is sharpened a few tiles per frame, as rectangles. A whole screen at once would be one
+    // big burst just when the picture stops, and the stream stalls.
+    unsigned sharpen_frames = 0;
+    for (int r = 1; r != 0 && sharpen_frames < 400; sharpen_frames++) {
+        r = native_video_encode(&c, &f, raw, sizeof(raw), 100, jpeg, sizeof(jpeg));
+        if (r != 0) {
+            assert(r == 2 && c.rect_count >= 1 && c.rect_used < NATIVE_AUTO_IDLE_BYTES / 2);
+        }
+    }
+    assert(sharpen_frames > 2 && sharpen_frames < 400); // several frames, and it settles
+    assert(c.picture_q >= 70 && c.picture_q > low);
     // one tile changes with a generous budget: a rectangle, at a high quality, no whole-screen re-encode
     for (int x = 48; x < 64; x++) {
         for (int y = 64; y < 80; y++) {

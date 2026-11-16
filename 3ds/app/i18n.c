@@ -95,6 +95,7 @@ const NativeTranslation native_translations[] = {
     {"Background service ended: %08lX", "背景程序已結束：%08lX", "バックグラウンドが終了しました：%08lX"},
     {"CPU core", "CPU 核心", "CPUコア"},
     {"Capture", "擷取模式", "画面取得"},
+    {"Network", "網路", "回線"},
     {"Auto", "自動偵測", "自動"},
     {"Core 1", "核心 1", "コア1"},
     {"Core 2", "核心 2", "コア2"},

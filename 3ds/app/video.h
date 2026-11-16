@@ -10,12 +10,15 @@
 // interval is refreshed with a whole screen so a receiver that missed something (reload, reconnect) recovers.
 #define NATIVE_RECT_MAX_BYTES 40000u
 #define NATIVE_RECT_HEADER_COST 700u
-#define NATIVE_KEYFRAME_MS 3000u
 // Automatic quality: what the Wi-Fi link carries comfortably (bytes/s; measured ceiling ~0.79 MB/s), the quality
 // floor, and a one-off budget (bytes per screen) for sharpening a picture that has stopped moving.
 #define NATIVE_AUTO_LINK 700000u
 #define NATIVE_AUTO_FLOOR 30u
 #define NATIVE_AUTO_IDLE_BYTES 110000u
+// A picture that stopped moving is sharpened over many frames: each takes this fraction of the idle budget, and at most
+// this many tiles.
+#define NATIVE_IDLE_FRACTION 8u
+#define NATIVE_IDLE_MAX_TILES 24u
 typedef struct {
     uint16_t x, y, w, h;
     uint32_t off, len;

@@ -114,11 +114,17 @@ static void edit_setting(NativeUI *ui, int direction, bool press_a) {
             break;
         }
         case 10:
-            ui->cpu_core = (ui->cpu_core + direction + 3) % 3;
+            ui->cpu_core = (ui->cpu_core + direction + NATIVE_CORE_COUNT) % NATIVE_CORE_COUNT;
             break;
         case 11:
             ui->capture_source ^= 1;
             break;
+        case 12: { // Auto, then 0.5 MB/s to 2 MB/s in steps of 0.25
+            int index = ui->cfg.link_kbps == 0 ? 0 : (ui->cfg.link_kbps - 500 + 128) / 250 + 1;
+            index = (index + direction + 8) % 8;
+            ui->cfg.link_kbps = index ? 500 + (index - 1) * 250 : 0;
+            break;
+        }
     }
 }
 // ---- The app: one instance for the whole run ----------------------------------------------------------------

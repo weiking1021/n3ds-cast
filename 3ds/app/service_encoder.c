@@ -11,6 +11,15 @@ char *b64[2];
 FrameSlot slots[2];
 // Set by the sender once the receiver said it composes rectangles; the encoder then produces partial updates.
 atomic_bool rects_mode = false;
+// Set by the sender when the receiver says it has no picture to build on ("NEED_KEY"): the next picture is a whole one.
+atomic_bool key_request = false;
+// What the automatic quality is working with now (shown in the TV's debug panel): the byte budget as a percentage of the
+// nominal link, and in bytes per frame.
+atomic_uint stat_budget_pct = 0, stat_budget_bytes = 0;
+// How fast the link takes pictures, bytes of text per second as measured by the sender (0 = not measured yet).
+atomic_uint stat_link_rate = 0;
+// The link speed the budget is planned with (bytes per second): what the user set, or the measurement kept in 0.5..2 MB/s.
+atomic_uint stat_link_used = 0;
 atomic_uint stat_rect_frames = 0, stat_full_frames = 0;
 atomic_uint stat_q_min = 1000, stat_q_max = 0,
             stat_q_now = 0; // JPEG quality used in the last second (for the TV OSD)
@@ -34,8 +43,11 @@ atomic_bool encoder_started = false, core2_failed = false;
 #define QUALITY_BACKOFF_MS 3000     // a screen that overflowed the buffer stays at the lower quality this long
 #define MIN_BACKOFF_QUALITY 60
 #define LATE_WINDOW_MS 400 // how often the lateness feedback is evaluated
-#define BUDGET_MIN_PCT 12
-#define BUDGET_MAX_PCT 100
+#define BUDGET_MIN_PCT 25
+#define BUDGET_START_PCT 100 // percent of what the measured link carries (the nominal link until a picture was sent)
+#define BUDGET_MAX_PCT 150   // some room above the measurement, to find out whether the link has more
+#define BUDGET_HOLD_WINDOWS                                                                                            \
+    25 // 25 windows of LATE_WINDOW_MS (10 s): how long a level that made frames late is not probed again
 
 // State of one encoder thread run.
 typedef struct {
@@ -48,8 +60,12 @@ typedef struct {
     // cost more than the link and the CPU allow, so the byte budget shrinks (percent of the nominal budget);
     // frames that start on time let it grow back. The size prediction alone is only a guess.
     unsigned budget_pct, late_sum, late_frames;
-    uint64_t late_window;
-    int quality_cap[2]; // lowered quality of a screen whose picture did not fit, until quality_until
+    unsigned ceil_pct,
+        hold; // the budget level that made frames late (less a margin), and how long it is not probed again
+    uint64_t late_window, blocked_from; // blocked_from: since when the encoder waits for a free slot (0 = it does not)
+    uint64_t last_start;                // when the previous frame started
+    unsigned avg_interval;              // ms between frame starts, smoothed: the pace the stream really runs at
+    int quality_cap[2];                 // lowered quality of a screen whose picture did not fit, until quality_until
     uint64_t quality_until[2];
     bool open; // capture handles may be open
 } EncoderRun;
@@ -93,9 +109,14 @@ static void adopt_epoch(EncoderRun *e, unsigned epoch) {
     invalidate_pictures();
     e->next_frame = e->last_refresh = 0;
     e->last_title = 0;
-    e->budget_pct = BUDGET_MAX_PCT;
+    e->budget_pct = BUDGET_START_PCT;
+    e->ceil_pct = BUDGET_MAX_PCT;
+    e->hold = 0;
     e->late_sum = e->late_frames = 0;
     e->late_window = 0;
+    e->blocked_from = 0;
+    e->last_start = 0;
+    e->avg_interval = 0;
 }
 
 // The title of what is being captured. False: no game to capture yet (status updated).
@@ -122,11 +143,11 @@ static int free_slot_index(void) {
     return -1;
 }
 
-// Lateness feedback for the automatic quality: shrink the byte budget when frames start late, regrow it when on time.
+// Congestion feedback for the automatic quality. The measure is how long the encoder had to wait for a free slot, i.e.
+// for the sender to finish the previous pictures (late_sum, in ms per window): that is the link being full, which
+// a smaller byte budget cures. Frames that start late for any other reason (the encoder's own CPU time) are not a reason
+// to lower the quality, which would not make them any earlier.
 static void track_lateness(EncoderRun *e, uint64_t now) {
-    if (e->next_frame && now > e->next_frame) {
-        e->late_sum += (unsigned)(now - e->next_frame);
-    }
     e->late_frames++;
     if (!e->late_window) {
         e->late_window = now;
@@ -135,25 +156,70 @@ static void track_lateness(EncoderRun *e, uint64_t now) {
     if (now - e->late_window < LATE_WINDOW_MS) {
         return;
     }
-    unsigned interval = 1000 / e->cfg.target_fps, average = e->late_frames ? e->late_sum / e->late_frames : 0;
-    if (average * 4 > interval) {
-        e->budget_pct = e->budget_pct * 70 / 100; // more than a quarter interval behind
-    } else if (average * 10 < interval) {
-        e->budget_pct += e->budget_pct / 6 + 1; // comfortably on time
+    unsigned window = (unsigned)(now - e->late_window), blocked = e->late_sum;
+    // Frames that start late mean the link (or the CPU) is full: back off a little and remember that level as the
+    // ceiling, so the budget settles just under it instead of overshooting every few seconds. On time: creep up
+    // towards the ceiling, and only after a pause of several seconds look for a higher one again.
+    if (blocked * 100 > window * 12) {
+        unsigned ceiling = e->budget_pct * 92 / 100;
+        e->ceil_pct = ceiling < BUDGET_START_PCT / 2 ? BUDGET_START_PCT / 2 : ceiling;
+        e->budget_pct = e->budget_pct * 85 / 100;
+        e->hold = BUDGET_HOLD_WINDOWS;
+    } else if (blocked * 100 < window * 3) {
+        if (e->budget_pct < e->ceil_pct) {
+            e->budget_pct += e->budget_pct / 25 + 1;
+        } else if (e->hold == 0 && e->ceil_pct < BUDGET_MAX_PCT) {
+            e->ceil_pct += e->ceil_pct / 10 + 1; // nothing went wrong for a while: allow a higher level
+        }
+    }
+    if (e->hold) {
+        e->hold--;
     }
     if (e->budget_pct < BUDGET_MIN_PCT) {
         e->budget_pct = BUDGET_MIN_PCT;
     }
+    if (e->budget_pct > e->ceil_pct) {
+        e->budget_pct = e->ceil_pct;
+    }
     if (e->budget_pct > BUDGET_MAX_PCT) {
         e->budget_pct = BUDGET_MAX_PCT;
     }
+    atomic_store(&stat_budget_pct, e->budget_pct);
     e->late_sum = e->late_frames = 0;
     e->late_window = now;
 }
 
-// JPEG bytes one frame may use: 9/10 of the link rate over the target FPS, as JPEG (Base64 adds a third: 3/4).
+// JPEG bytes one frame may use: 9/10 of the link rate over the time a frame really takes, as JPEG (Base64 adds a
+// third: 3/4). That is the target FPS's interval, or a longer one when the encoder cannot keep that pace: a frame that
+// is only made every 40 ms may carry more bytes than one due every 16 ms, the link has the time for them.
 static unsigned frame_byte_budget(const EncoderRun *e) {
-    return (unsigned)((uint64_t)NATIVE_AUTO_LINK * 9 / 10 * 3 / 4 / e->cfg.target_fps * e->budget_pct / 100);
+    unsigned interval = 1000 / e->cfg.target_fps;
+    if (e->avg_interval > interval) {
+        interval = e->avg_interval;
+    }
+    // The planned link speed: what the user set (Network setting), or, automatic, the nominal one, raised to what the
+    // sender measured when that is more (80% of it, at most 2 MB/s). The measurement is the bytes of a picture over the
+    // whole time it took to send, which includes every wait that is not the link (a full buffer, a preempted thread):
+    // it falls with every hiccup, so it is never allowed to pull the plan below the nominal speed.
+    unsigned link, share;
+    if (e->cfg.link_kbps > 0) {
+        link = (unsigned)e->cfg.link_kbps * 1000u;
+        share = 9;
+    } else {
+        unsigned measured = atomic_load(&stat_link_rate);
+        measured = measured > 2000000u ? 2000000u : measured;
+        if (measured * 8u > NATIVE_AUTO_LINK * 9u) {
+            link = measured;
+            share = 8;
+        } else {
+            link = NATIVE_AUTO_LINK;
+            share = 9;
+        }
+    }
+    atomic_store(&stat_link_used, link);
+    unsigned bytes = (unsigned)((uint64_t)link * share / 10 * 3 / 4 * interval / 1000 * e->budget_pct / 100);
+    atomic_store(&stat_budget_bytes, bytes);
+    return bytes;
 }
 
 // Automatic quality (setting 0): the cache picks the quality from how many tiles changed and this frame's byte budget.
@@ -208,8 +274,10 @@ static void encode_screen(EncoderRun *e, unsigned i, bool rects, uint64_t now, b
         e->quality_until[i] = now + QUALITY_BACKOFF_MS;
         encoded = native_video_encode(&video[i], &frame, raw, RAW_BUFFER_SIZE, quality, jpeg, NATIVE_JPEG_MAX);
     }
-    // Unchanged screen, refresh due, but partial updates made the cached whole screen out of date:
-    if (encoded == 0 && now - e->last_refresh >= REFRESH_INTERVAL_MS && video[i].full_stale) {
+    // Unchanged screen, refresh due, but partial updates made the cached whole screen out of date. A receiver that
+    // composes rectangles has the picture and asks (NEED_KEY) if it does not, so nothing is repeated for it; one that
+    // takes whole screens only gets them repeated now and then.
+    if (encoded == 0 && !rects && now - e->last_refresh >= REFRESH_INTERVAL_MS && video[i].full_stale) {
         encoded = native_video_refresh(&video[i], quality, jpeg, NATIVE_JPEG_MAX);
     }
     atomic_fetch_add(&stat_encode_ms, (unsigned)(osGetTime() - stage));
@@ -219,7 +287,7 @@ static void encode_screen(EncoderRun *e, unsigned i, bool rects, uint64_t now, b
         atomic_fetch_add(&stat_full_frames, 1);
     }
     result[i] = encoded;
-    if (encoded > 0 || (encoded == 0 && now - e->last_refresh >= REFRESH_INTERVAL_MS)) {
+    if (encoded > 0 || (encoded == 0 && !rects && now - e->last_refresh >= REFRESH_INTERVAL_MS)) {
         use[i] = true;
     } else if (encoded < 0) {
         note_rejected();
@@ -285,8 +353,11 @@ static void encoder_thread(void *argument) {
     }
     unsigned token = atomic_load(&worker_token);
     atomic_store(&encoder_started, true);
-    EncoderRun e = {
-        .source = NATIVE_SOURCE_GAME, .epoch = ~0u, .budget_pct = BUDGET_MAX_PCT, .quality_cap = {100, 100}};
+    EncoderRun e = {.source = NATIVE_SOURCE_GAME,
+                    .epoch = ~0u,
+                    .budget_pct = BUDGET_START_PCT,
+                    .ceil_pct = BUDGET_MAX_PCT,
+                    .quality_cap = {100, 100}};
     bool prev_rects = false;
     while (!atomic_load(&quitting) && token == atomic_load(&worker_token) && gen == atomic_load(&encoder_gen)) {
         if (!atomic_load(&enc_enabled)) {
@@ -316,15 +387,31 @@ static void encoder_thread(void *argument) {
         }
         int free_slot = free_slot_index();
         if (free_slot < 0) {
+            if (!e.blocked_from) {
+                e.blocked_from = now; // the sender is still busy with the earlier pictures
+            }
             svcSleepThread(SLOT_WAIT_NS);
             continue;
         }
+        if (e.blocked_from) {
+            e.late_sum += (unsigned)(now - e.blocked_from);
+            e.blocked_from = 0;
+        }
         track_lateness(&e, now);
+        if (e.last_start) {
+            unsigned since = (unsigned)(now - e.last_start);
+            since = since > 250 ? 250 : since;
+            e.avg_interval = e.avg_interval ? (e.avg_interval * 7 + since) / 8 : since;
+        }
+        e.last_start = now;
         e.next_frame = now + 1000 / e.cfg.target_fps;
         bool use[2] = {false, false};
         int result[2] = {0, 0};
         unsigned readable = 0;
         bool rects = atomic_load(&rects_mode);
+        if (atomic_exchange(&key_request, false)) {
+            invalidate_pictures(); // the receiver has no picture to build on (a page just opened): a whole screen next
+        }
         if (rects != prev_rects) {
             invalidate_pictures(); // first frame in the new mode is a whole screen
             prev_rects = rects;
