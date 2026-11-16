@@ -1,6 +1,9 @@
 import { applyStaticText, onLocaleChange, t, type MessageKey } from './i18n';
 import type { DisplayConfig, StatsMessage } from './protocol';
 
+/** When this page was built (set by vite.config.mts), shown next to the version so a new build can be told apart. */
+declare const __BUILD__: string;
+
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
   if (!found) throw new Error(`index.html has no #${id}`);
@@ -47,13 +50,13 @@ export class Hud {
     this.splashStatus.textContent = t(this.splashKey);
     this.mode.textContent = `${t('mode.label')}: ${t(LAYOUT_NAMES[this.layout] || 'mode.top')}`;
     this.versions.textContent = this.senderVersion
-      ? t('version.both', { sender: this.senderVersion, receiver: this.receiverVersion })
-      : t('version.receiver', { receiver: this.receiverVersion });
+      ? t('version.both', { sender: this.senderVersion, receiver: `${this.receiverVersion} (${__BUILD__})` })
+      : t('version.receiver', { receiver: `${this.receiverVersion} (${__BUILD__})` });
   }
 
   /** The 3DS program announces its version in its CAPS message; both are shown. */
-  showVersions(senderVersion: string): void {
-    this.senderVersion = senderVersion;
+  showVersions(senderVersion: string, build = ''): void {
+    this.senderVersion = senderVersion && build ? `${senderVersion} (${build})` : senderVersion;
     this.refresh();
   }
 
@@ -122,8 +125,17 @@ export class Hud {
     const cpu = typeof m.tn === 'number' && typeof m.t === 'number' ? (m.t - m.tn / 10).toFixed(1) : '-';
     const lines = [
       `R${num(m.r)} J${num(m.j)} T${num(m.t)} ms`,
-      `T net ${tenths(m.tn)} / cpu ${cpu}`,
+      typeof m.wr === 'number' && typeof m.tn === 'number' && typeof m.t === 'number'
+        ? // the send time per frame in four parts: the network itself, the TLS work around it (encryption), building
+          // the messages, and the rest (waiting, being preempted)
+          `T net ${tenths(m.tn)} / tls ${tenths(m.wr - m.tn)} / build ${tenths(m.bd)} / other ${(m.t - m.wr / 10 - (m.bd || 0) / 10).toFixed(1)}`
+        : `T net ${tenths(m.tn)} / cpu ${cpu}`,
       `J conv ${tenths(m.jc)} / jpeg ${tenths(m.jj)} / b64 ${tenths(m.jb)}`,
+      `jpeg = gather ${tenths(m.pg)} / dct ${tenths(m.pd)} / entropy ${tenths(m.pe)}`,
+      `budget ${m.bp ? `${m.bp}% = ${((m.bb || 0) / 1024).toFixed(1)} KB/frame` : '-'}`,
+      // the link speed the pictures are planned for, and what the 3DS actually measured while sending
+      `network ${m.la ? 'auto' : 'set'} ${m.lk ? `${(m.lk / 1000).toFixed(2)} MB/s` : '-'}  (measured ${m.lm ? `${(m.lm / 1000).toFixed(2)} MB/s` : '-'})`,
+      `TLS ${m.ci || '-'}`,
       `core ${m.core || '-'}${m.fb ? ' (fell back)' : ''}  rejected ${num(m.rej)}  reconnects ${num(m.rc)}`,
       `audio sent ${num(m.sent)}  dropped ${num(m.drop)}`,
     ];

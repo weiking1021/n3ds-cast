@@ -19,6 +19,7 @@ export interface CapsMessage {
   type: 'CAPS';
   rects?: number;
   ver?: string;
+  build?: string; // when the 3DS program was compiled
   lang?: string; // the language the 3DS program is set to (a language tag such as "en" or "zh-TW")
 }
 
@@ -42,6 +43,8 @@ export interface FrameMessage {
   top?: string;
   bot?: string;
   cont?: number;
+  /** "direct": the PC receiver got it on its plain TCP port (the 3DS sent it without TLS). */
+  via?: string;
 }
 
 /** One numbered piece of a screen that did not fit in a single 64 KB message. */
@@ -53,6 +56,7 @@ export interface FramePartMessage {
   n: number;
   d: string;
   cont?: number;
+  via?: string; // see FrameMessage
 }
 
 /** A rectangle of a screen (partial update), or a numbered piece of one. */
@@ -66,6 +70,7 @@ export interface RectMessage {
   n: number;
   d: string;
   cont?: number;
+  via?: string; // see FrameMessage
 }
 
 export interface AudioMessage {
@@ -103,6 +108,17 @@ export interface StatsMessage {
   qn?: number;
   qx?: number;
   rc?: number;
+  bp?: number; // the byte budget of the automatic quality: percent of the link speed
+  bb?: number; // ... and bytes per frame
+  wr?: number; // tenths of a ms per frame inside the TLS write (the network part is in tn)
+  bd?: number; // tenths of a ms per frame spent building the messages
+  ci?: string; // the TLS cipher suite of the Cast connection
+  lk?: number; // the link speed the pictures are planned for, KB/s
+  lm?: number; // ... the speed the sender measured, KB/s (0 = not yet)
+  pg?: number; // where the JPEG time goes, tenths of a ms per frame: gathering the pixels (colour conversion) ...
+  pd?: number; // ... the DCT
+  pe?: number; // ... entropy coding
+  la?: number; // 1: the speed is chosen automatically (3DS setting Network = Auto), 0: set by hand
 }
 
 export type Message =

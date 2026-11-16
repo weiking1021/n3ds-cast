@@ -5,4 +5,6 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: './',
   build: { outDir: 'dist', target: 'es2018', emptyOutDir: true },
+  // when the page was built: shown next to the version in the debug panel
+  define: { __BUILD__: JSON.stringify(new Date().toISOString().slice(5, 16).replace('T', ' ')) },
 });

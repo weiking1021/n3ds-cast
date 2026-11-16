@@ -58,11 +58,14 @@ export class Video {
   private jankRaf = 0;
   private lastArrive = 0;
   private rafLast = performance.now();
+  private lastKeyAsk = -Infinity;
+  private sawPicture = false;
 
   /** `begin` is called with the config of every message that starts to show a picture. */
   constructor(
     private readonly hud: Hud,
     private readonly begin: (cfg: DisplayConfig | undefined) => void,
+    private readonly needKey: () => void = () => {},
   ) {
     const loop = () => {
       requestAnimationFrame((t) => {
@@ -77,7 +80,7 @@ export class Video {
   handleFrame(msg: FrameMessage): void {
     this.measure(() => {
       const wire = (msg.top ? msg.top.length : 0) + (msg.bot ? msg.bot.length : 0);
-      this.showFrame(msg.cfg, msg.top || null, msg.bot || null, wire, 'base64', msg.cont === 1);
+      this.showFrame(msg.cfg, msg.top || null, msg.bot || null, wire, msg.via === 'direct' ? 'base64 direct' : 'base64', msg.cont === 1);
     });
   }
 
@@ -100,7 +103,7 @@ export class Video {
     screen.pieces = result.slot;
     if (result.done !== null) {
       const full = result.done;
-      this.showFrame(msg.cfg, which === 'top' ? full : null, which === 'bot' ? full : null, full.length, 'base64', msg.cont === 1);
+      this.showFrame(msg.cfg, which === 'top' ? full : null, which === 'bot' ? full : null, full.length, msg.via === 'direct' ? 'base64 direct' : 'base64', msg.cont === 1);
     }
   }
 
@@ -127,10 +130,16 @@ export class Video {
         return;
       }
       this.begin(msg.cfg);
+      if (!this.sawPicture) {
+        // the sender does not repeat whole screens by itself: the first picture message a page gets may be a part of a
+        // picture it never had, so it asks once (a few extra KB when it was the first whole screen anyway)
+        this.sawPicture = true;
+        this.askKey();
+      }
       screen.rectPieces = result.slot;
       if (result.done !== null) {
         this.queueDraw(screen, x, y, result.done);
-        this.accountFrame(result.done.length, 'rects', msg.cont === 1);
+        this.accountFrame(result.done.length, msg.via === 'direct' ? 'rects direct' : 'rects', msg.cont === 1);
       }
     });
   }
@@ -154,6 +163,16 @@ export class Video {
     if (top) this.screens.top.image.src = `data:image/jpeg;base64,${top}`;
     if (bot) this.screens.bot.image.src = `data:image/jpeg;base64,${bot}`;
     this.accountFrame(wireBytes, format, cont);
+  }
+
+  // Asks the sender for a whole picture (at most once a second): there is nothing here to build the rectangles on, e.g.
+  // this page was just opened while the 3DS was already streaming.
+  private askKey(): void {
+    const now = performance.now();
+    if (now - this.lastKeyAsk > 1000) {
+      this.lastKeyAsk = now;
+      this.needKey();
+    }
   }
 
   private queueDraw(screen: Surface, x: number, y: number, base64: string): void {

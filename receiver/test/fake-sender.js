@@ -49,7 +49,7 @@ class FakeSender {
   constructor() { this.waiters = []; this.inbox = []; this.request = 1; }
   connect(host, port) {
     return new Promise((resolve, reject) => {
-      this.socket = tls.connect({ host, port, rejectUnauthorized: false, minVersion: 'TLSv1.2' }, () => resolve(this));
+      this.socket = tls.connect({ host, port, rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' }, () => resolve(this));
       this.socket.on('error', reject);
       const framer = new Framer((m) => this.onMessage(m));
       this.socket.on('data', (d) => framer.push(d));

@@ -5,8 +5,13 @@
 // page built into dist/ (npm run build; opened from http://localhost:8080 it switches to its WebSocket stand-in for
 // the Cast SDK).
 //
-//   node server.js [--name "PC Receiver"] [--ip 192.168.1.20] [--http 8080] [--cast 8009] [--no-mdns] [--page <folder>]
+//   node server.js [--name "PC Receiver"] [--ip 192.168.1.20] [--http 8080] [--cast 8009] [--direct 8010] [--aes] [--no-mdns] [--page <folder>]
+//
+// Besides the Cast port there is a plain TCP "direct" port (--direct 0 turns it off): the page's HELLO is passed on to the
+// 3DS with that port added, and the 3DS then sends its pictures there, 4-byte length + the same JSON, without TLS (the
+// encryption costs the 3DS more CPU time than the network does). Audio and everything else stays on the Cast port.
 const http = require('http');
+const net = require('net');
 const tls = require('tls');
 const fs = require('fs');
 const os = require('os');
@@ -28,6 +33,8 @@ const opts = {
   ip: arg('ip', null),
   http: Number(arg('http', 8080)),
   cast: Number(arg('cast', 8009)),
+  direct: Number(arg('direct', 8010)),
+  aes: !!arg('aes', false), // prefer AES-GCM (what a server picks by default) instead of ChaCha20-Poly1305
   mdns: !arg('no-mdns', false),
   page: path.resolve(String(arg('page', path.join(__dirname, 'dist')))),
 };
@@ -89,6 +96,7 @@ function receiverStatus(requestId) {
 function toPages(obj) { const text = JSON.stringify(obj); for (const ws of pages) if (ws.readyState === 1) ws.send(text); }
 
 function onSenderMessage(entry, id, m, wire) {
+  entry.lastSource = m.source;
   stats.msgs++;
   let json = null;
   try { json = JSON.parse(m.payload); } catch (_) { /* custom payloads are JSON too, but be tolerant */ }
@@ -131,8 +139,49 @@ function onSenderMessage(entry, id, m, wire) {
   }
 }
 
+// The direct port: length-prefixed JSON messages (the pictures) from a 3DS that is also connected on the Cast port.
+// They are passed to the pages like the ones from the Cast port, marked with "via":"direct" for the page's panel.
+const MAX_DIRECT_MESSAGE = 4 * 1024 * 1024;
+function startDirectServer() {
+  const server = net.createServer((socket) => {
+    socket.setNoDelay(true);
+    let pending = Buffer.alloc(0);
+    log(`direct connection from ${socket.remoteAddress}`);
+    socket.on('data', (chunk) => {
+      pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+      while (pending.length >= 4) {
+        const length = pending.readUInt32BE(0);
+        if (length === 0 || length > MAX_DIRECT_MESSAGE) { socket.destroy(); return; }
+        if (pending.length < 4 + length) break;
+        const text = pending.subarray(4, 4 + length).toString('utf8');
+        pending = pending.subarray(4 + length);
+        let json; try { json = JSON.parse(text); } catch (_) { socket.destroy(); return; }
+        stats.msgs++;
+        if (json.type === 'FRAME' || json.type === 'FRAMEPART' || json.type === 'RECT') { stats.frames++; stats.bytes += length; }
+        json.via = 'direct';
+        // the page answers to the sender it knows: the one on the Cast port with the same address
+        let senderId = '';
+        for (const [sid, entry] of senders) {
+          if (entry.socket.remoteAddress === socket.remoteAddress) senderId = `${sid}:${entry.lastSource || 'sender-0'}`;
+        }
+        toPages({ ctl: 'cast', ns: NS.custom, senderId, data: json });
+      }
+    });
+    socket.on('error', (e) => log(`direct ${socket.remoteAddress}: ${e.message}`));
+    socket.on('close', () => log(`direct connection from ${socket.remoteAddress} closed`));
+  });
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(opts.direct, '0.0.0.0', () => resolve(server));
+  });
+}
+
 function startCastServer(cert) {
-  const server = tls.createServer({ key: cert.private, cert: cert.cert, minVersion: 'TLSv1.2' }, (socket) => {
+  // ChaCha20-Poly1305 first, as a Google TV prefers it for a client that lists it first: the 3DS has no AES instructions, so
+  // software AES-GCM costs it much more CPU time. (A server picks by its own order, so it has to be set here; --aes brings
+  // the default order back to compare.)
+  const cipherOrder = opts.aes ? {} : { ciphers: 'ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384', honorCipherOrder: true };
+  const server = tls.createServer({ key: cert.private, cert: cert.cert, minVersion: 'TLSv1.2', ...cipherOrder }, (socket) => {
     const id = nextSocket++;
     const entry = { socket };
     senders.set(id, entry);
@@ -176,6 +225,8 @@ function startHttp() {
       if (m.ctl !== 'send') return;
       const [sid, source] = String(m.senderId).split(':');
       const entry = senders.get(Number(sid));
+      // the page's HELLO tells the 3DS where to send the pictures without TLS
+      if (m.data && m.data.type === 'HELLO' && opts.direct) m.data = { ...m.data, direct: opts.direct };
       if (entry && app) sendTo(entry, app.transportId, source || 'sender-0', m.ns, m.data);
     });
     ws.on('close', () => { pages.delete(ws); log(`browser page closed (${pages.size})`); });
@@ -193,12 +244,17 @@ async function main() {
     { keySize: 2048, algorithm: 'sha256', days: 365, extensions: [{ name: 'basicConstraints', cA: true }] });
   const castServer = await startCastServer(pems);
   const httpServer = await startHttp();
+  let directServer = null;
+  if (opts.direct) {
+    try { directServer = await startDirectServer(); } catch (e) { log(`direct port ${opts.direct}: ${e.message} (going on without it)`); }
+  }
   log(`n3ds-cast receiver v${version}`);
+  if (directServer) log(`direct picture port ${opts.direct} (plain TCP; if the 3DS cannot reach it, allow it in the firewall, or it falls back to the Cast port)`);
   log(`Cast device "${opts.name}" listening on ${ip}:${opts.cast} (TLS), page at http://localhost:${opts.http}`);
   let mdns = null;
   if (opts.mdns) mdns = await startMdns({ ip, friendlyName: opts.name, port: opts.cast, id, log });
   log('On the 3DS: open the app, pick this device (or type ' + ip + ') and start streaming. Open the page in a browser first.');
-  const bye = () => { if (mdns) mdns.stop(); castServer.close(); httpServer.close(); setTimeout(() => process.exit(0), 300); };
+  const bye = () => { if (mdns) mdns.stop(); castServer.close(); httpServer.close(); if (directServer) directServer.close(); setTimeout(() => process.exit(0), 300); };
   process.on('SIGINT', bye); process.on('SIGTERM', bye);
   setInterval(() => {
     if (stats.msgs) log(`stats: ${stats.frames} frame messages, ${(stats.bytes / 1024).toFixed(0)} KB, ${senders.size} sender(s), ${pages.size} page(s)`);

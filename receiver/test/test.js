@@ -11,11 +11,11 @@ const { FakeSender, frameMessages } = require('./fake-sender');
 const { NS } = require('../castv2');
 const { jpegOfSize } = require('./sample-jpeg');
 
-const CAST = 18009, HTTP = 18080, APP = '01B7A380';
+const CAST = 18009, HTTP = 18080, DIRECT = 18010, APP = '01B7A380';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
-  const server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), '--cast', String(CAST), '--http', String(HTTP), '--name', 'Test Receiver'],
+  const server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), '--cast', String(CAST), '--http', String(HTTP), '--direct', String(DIRECT), '--name', 'Test Receiver'],
     { stdio: ['ignore', 'pipe', 'inherit'] });
   let output = '';
   server.stdout.on('data', (d) => { output += d; });
@@ -44,6 +44,8 @@ async function main() {
 
     // 1. launch like the 3DS does; a second launch reports the same running app
     const s = await new FakeSender().connect('127.0.0.1', CAST);
+    await sleep(100);
+    assert(/TLSv1\.2 ECDHE-RSA-CHACHA20-POLY1305/.test(output), 'the PC receiver should pick ChaCha20-Poly1305 (cheaper for a 3DS without AES instructions):\n' + output);
     s.send(NS.connection, 'receiver-0', { type: 'CONNECT' });
     s.send(NS.receiver, 'receiver-0', { type: 'GET_STATUS', requestId: 1 });
     const idle = await s.waitFor((m) => m.json && m.json.type === 'RECEIVER_STATUS');
@@ -64,6 +66,7 @@ async function main() {
     const hello = await s.waitFor((m) => m.json && m.json.type === 'HELLO');
     assert.strictEqual(hello.source, app.transportId);
     assert.strictEqual(hello.ns, NS.custom);
+    assert.strictEqual(hello.json.direct, DIRECT, 'the HELLO passed on to the 3DS names the direct picture port');
 
     // 3. heartbeat
     s.send(NS.heartbeat, 'receiver-0', { type: 'PING' });
@@ -95,6 +98,27 @@ async function main() {
     assert(rects[0].cfg && !rects[1].cfg, 'cfg only in the first message');
     assert.strictEqual(rects[0].d, small);
     assert.strictEqual(rects.slice(1).map((r) => r.d).join(''), big);
+
+    // 4c. the direct port: length-prefixed JSON from the same address reaches the page, marked "via":"direct", with the
+    // sender id of the Cast connection (the page answers to it); two messages in one write, and one in two pieces
+    {
+      const net = require('net');
+      const direct = net.connect(DIRECT, '127.0.0.1');
+      await new Promise((r) => direct.once('connect', r));
+      const pack = (obj) => { const body = Buffer.from(JSON.stringify(obj)); const head = Buffer.alloc(4); head.writeUInt32BE(body.length); return Buffer.concat([head, body]); };
+      fromTv.length = 0;
+      const a = pack({ type: 'RECT', s: 'top', x: 0, y: 0, w: 400, h: 240, i: 0, n: 1, d: small });
+      const b = pack({ type: 'RECT', s: 'bot', x: 0, y: 0, w: 320, h: 240, i: 0, n: 1, d: big });
+      direct.write(Buffer.concat([a, b.subarray(0, 100)]));
+      await sleep(50);
+      direct.write(b.subarray(100));
+      await next((m) => m.ctl === 'cast' && m.data.type === 'RECT' && m.data.s === 'bot');
+      const viaDirect = fromTv.filter((m) => m.ctl === 'cast' && m.data.via === 'direct');
+      assert.strictEqual(viaDirect.length, 2, 'both direct messages reach the page');
+      assert.strictEqual(viaDirect[0].data.d, small); assert.strictEqual(viaDirect[1].data.d, big);
+      assert(viaDirect[0].senderId.startsWith(caps.senderId.split(':')[0] + ':'), 'the page can answer to the Cast sender of that address');
+      direct.destroy();
+    }
 
     // 5. STOP (what the 3DS does before relaunching): status without the app, CLOSE for the transport, page reset
     fromTv.length = 0;

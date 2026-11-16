@@ -31,11 +31,20 @@ function applyConfig(cfg: DisplayConfig): void {
   if (cfg.audio_enabled !== undefined) audio.configure(cfg.audio_enabled === 1, Number(cfg.audio_kbps));
 }
 
-const video = new Video(hud, (cfg) => {
-  hud.hideSplash();
-  hud.setState('state.live');
-  if (cfg) applyConfig(cfg);
-});
+// The sender that talks to this page: a page that was just opened while the 3DS is already streaming has no picture to
+// build the rectangles on, so it asks that sender for a whole one.
+let lastSenderId = '';
+const video = new Video(
+  hud,
+  (cfg) => {
+    hud.hideSplash();
+    hud.setState('state.live');
+    if (cfg) applyConfig(cfg);
+  },
+  () => {
+    if (lastSenderId) context.sendCustomMessage(NAMESPACE, lastSenderId, { type: 'NEED_KEY' });
+  },
+);
 
 // ---- Where are we running? On a Cast device the real Cast SDK drives this page. Anywhere else (a desktop browser
 // opened from receiver/server.js, http://localhost:8080) there is no Cast SDK, so a small stand-in with the same
@@ -66,6 +75,7 @@ const context: ReceiverContext = devMode
   : createCastContext();
 
 function handleMessage(raw: unknown, senderId: string): void {
+  if (senderId) lastSenderId = senderId;
   let message: Message;
   if (typeof raw === 'string') {
     try {
@@ -82,7 +92,10 @@ function handleMessage(raw: unknown, senderId: string): void {
     case 'CAPS': {
       // The sender asks what this page understands: "rects" = partial screen updates (RECT messages). An older page
       // never answers and the sender keeps to whole Base64 frames.
-      hud.showVersions(typeof message.ver === 'string' ? message.ver.slice(0, 16) : '');
+      hud.showVersions(
+        typeof message.ver === 'string' ? message.ver.slice(0, 16) : '',
+        typeof message.build === 'string' ? message.build.slice(0, 24) : '',
+      );
       if (typeof message.lang === 'string') {
         senderLanguage = message.lang;
         chooseLanguage();

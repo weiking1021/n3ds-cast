@@ -1,6 +1,6 @@
 {
   "name": "n3ds-cast-receiver",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "The n3ds-cast receiver: the Google Cast receiver page (TypeScript, built with Vite) plus a PC receiver (Cast protocol server + mDNS) that shows the stream in a browser",
   "private": true,
   "license": "UNLICENSED",
